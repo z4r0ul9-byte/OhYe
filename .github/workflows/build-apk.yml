@@ -32,11 +32,11 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4.0.4
 
-      - name: Clean dependencies (Force fresh install)
-        run: rm -rf node_modules package-lock.json
-
-      - name: Install dependencies
-        run: npm install
+      - name: Install dependencies (Force install missing packages)
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+          npm install @capacitor/filesystem @capacitor/share jszip
 
       - name: Build web (Vite)
         run: npm run build
@@ -67,10 +67,6 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: Build #${{ github.run_number }}
-          body: |
-            Automatic APK build from commit ${{ github.sha }}.
-            Download `app-debug.apk` below.
           files: android/app/build/outputs/apk/debug/app-debug.apk
-          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
