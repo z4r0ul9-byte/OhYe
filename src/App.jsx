@@ -5,6 +5,7 @@ import Step2 from './components/Wizard/Step2'
 import Step3 from './components/Wizard/Step3'
 import Step4 from './components/Wizard/Step4'
 import Step5 from './components/Wizard/Step5'
+import Settings from './components/Settings'
 
 const INITIAL_DATA = {
   mode: '',
@@ -33,6 +34,7 @@ const STEPS = [
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState(INITIAL_DATA)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDone, setIsDone] = useState(false)
@@ -86,16 +88,21 @@ export default function App() {
   }
 
   return (
-    <WizardLayout
-      steps={STEPS}
-      currentStep={currentStep}
-      onNext={handleNext}
-      onPrev={handlePrev}
-      canNext={canAdvance()}
-      isLast={currentStep === STEPS.length}
-      hideNextButton={currentStep === 5}
-    >
-      {renderStep()}
-    </WizardLayout>
+    <>
+      <WizardLayout
+        steps={STEPS}
+        currentStep={currentStep}
+        onNext={handleNext}
+        onPrev={handlePrev}
+        canNext={canAdvance()}
+        isLast={currentStep === STEPS.length}
+        hideNextButton={currentStep === 5}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      >
+        {renderStep()}
+      </WizardLayout>
+
+      {isSettingsOpen && <Settings onClose={() => setIsSettingsOpen(false)} />}
+    </>
   )
 }
