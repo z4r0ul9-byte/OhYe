@@ -16,6 +16,8 @@ import {
   Share2,
   Rocket,
   Terminal,
+  Download,
+  AlertCircle,
 } from 'lucide-react'
 import TerminalLog from '../ui/TerminalLog'
 
@@ -43,52 +45,71 @@ export default function Step5({ data }) {
   const [errorMsg, setErrorMsg] = useState('')
   const [savedFileName, setSavedFileName] = useState('')
   
-  // State untuk Simulasi Build & Terminal
+  // State Build
   const [isBuilding, setIsBuilding] = useState(false)
   const [logs, setLogs] = useState([])
+  const [apkUrl, setApkUrl] = useState('')
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
+
+  const addLog = (text, type = 'info') => {
+    setLogs((prev) => [
+      ...prev,
+      {
+        time: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+        type,
+        text,
+      },
+    ])
+  }
+
+  // --- FUNGSI 1: GENERATE ZIP MANUAL ---
+  const generateProjectFiles = async () => {
+    const zip = new JSZip()
+
+    // File dasar
+    zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
+    zip.file('capacitor.config.json', JSON.stringify({ appId: 'com.generated.app', appName: data.appName || 'My App', webDir: 'dist' }, null, 2))
+    zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
+    zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>`)
+    zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
+
+    // App Logic
+    let appJsx = ''
+    if (data.mode === 'website') {
+      appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
+    } else if (data.mode === 'html') {
+      appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh' }} />) }`
+    } else {
+      appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
+    }
+    zip.file('src/App.jsx', appJsx)
+
+    // File pendukung
+    if (data.appIcon) zip.file('public/icon.png', data.appIcon)
+    if (data.mode === 'zip' && data.uploadedFile) {
+      const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
+      const filePromises = []
+      uploadedZip.forEach((relativePath, file) => {
+        if (!file.dir) filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
+      })
+      await Promise.all(filePromises)
+      appJsx = `export default function App() { return (<iframe src="./offline/index.html" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
+      zip.file('src/App.jsx', appJsx)
+    }
+
+    return zip
+  }
 
   const handleGenerateZip = async () => {
     setIsGenerating(true)
     setErrorMsg('')
 
     try {
-      const zip = new JSZip()
-
-      // File dasar
-      zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
-      zip.file('capacitor.config.json', JSON.stringify({ appId: 'com.generated.app', appName: data.appName || 'My App', webDir: 'dist' }, null, 2))
-      zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
-      zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>`)
-      zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
-
-      // App Logic
-      let appJsx = ''
-      if (data.mode === 'website') {
-        appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
-      } else if (data.mode === 'html') {
-        appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh' }} />) }`
-      } else {
-        appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
-      }
-      zip.file('src/App.jsx', appJsx)
-
-      // File pendukung
-      if (data.appIcon) zip.file('public/icon.png', data.appIcon)
-      if (data.mode === 'zip' && data.uploadedFile) {
-        const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
-        const filePromises = []
-        uploadedZip.forEach((relativePath, file) => {
-          if (!file.dir) filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
-        })
-        await Promise.all(filePromises)
-        appJsx = `export default function App() { return (<iframe src="./offline/index.html" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
-        zip.file('src/App.jsx', appJsx)
-      }
-
-      // Workflow
+      const zip = await generateProjectFiles()
+      
+      // Workflow untuk manual ZIP (Langsung build tanpa unzip)
       zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
 
       const content = await zip.generateAsync({ type: 'blob' })
@@ -117,39 +138,151 @@ export default function Step5({ data }) {
     }
   }
 
-  // ===== SIMULASI AUTO-BUILD DENGAN TERMINAL LOG =====
-  const handleAutoBuild = () => {
+  // --- FUNGSI 2: AUTO BUILD VIA GITHUB API ---
+  const handleAutoBuild = async () => {
+    const token = localStorage.getItem('github_token')
+    if (!token) {
+      setErrorMsg('Token GitHub belum diatur. Buka menu Pengaturan (ikon roda gigi di kanan atas).')
+      return
+    }
+
     setIsBuilding(true)
     setLogs([])
+    setApkUrl('')
+    setErrorMsg('')
 
-    const buildSteps = [
-      { delay: 500, type: 'info', text: 'Menghubungkan ke GitHub API...' },
-      { delay: 1200, type: 'success', text: 'Autentikasi Token Berhasil.' },
-      { delay: 2000, type: 'info', text: 'Membuat repositori workspace...' },
-      { delay: 2800, type: 'info', text: 'Mengunggah 24 file proyek...' },
-      { delay: 4000, type: 'info', text: 'Memicu GitHub Actions workflow...' },
-      { delay: 5000, type: 'warning', text: 'Menunggu server build (Estimasi: 2-3 menit)...' },
-      { delay: 6500, type: 'info', text: '> setup-node@v4 (Node.js 20)' },
-      { delay: 7500, type: 'info', text: '> install dependencies (npm install --legacy-peer-deps)' },
-      { delay: 8500, type: 'info', text: '> build web (vite build)' },
-      { delay: 9500, type: 'info', text: '> build android (gradlew assembleDebug)' },
-      { delay: 11000, type: 'success', text: 'Build Selesai! APK berhasil dibuat.' },
-      { delay: 11500, type: 'success', text: 'File APK siap diunduh.' },
-    ]
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json',
+    }
 
-    buildSteps.forEach((step) => {
-      setTimeout(() => {
-        setLogs((prev) => [
-          ...prev,
-          {
-            time: new Date().toLocaleTimeString('id-ID', { hour12: false }),
-            type: step.type,
-            text: step.text,
-          },
-        ])
-        if (step.delay === 11500) setIsBuilding(false)
-      }, step.delay)
-    })
+    try {
+      // 1. Dapatkan Info User
+      addLog('Memverifikasi Token GitHub...')
+      const userRes = await fetch('https://api.github.com/user', { headers })
+      if (!userRes.ok) throw new Error('Token tidak valid atau kadaluarsa.')
+      const user = await userRes.json()
+      const username = user.login
+
+      // 2. Buat Repositori Baru
+      const repoName = `app-builder-${Date.now()}`
+      addLog(`Membuat repositori baru: ${username}/${repoName}...`)
+      const repoRes = await fetch('https://api.github.com/user/repos', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ name: repoName, private: true, auto_init: false }),
+      })
+      if (!repoRes.ok) throw new Error('Gagal membuat repositori. Pastikan Token punya akses "repo".')
+
+      // 3. Siapkan File
+      addLog('Mengemas proyek ke dalam ZIP...')
+      const zip = await generateProjectFiles()
+      
+      // Workflow khusus untuk Auto-Build (menggunakan unzip)
+      const workflowYml = `name: Build APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip Project
+        run: unzip project.zip -d .
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/setup-java@v4
+        with: { distribution: 'temurin', java-version: '17' }
+      - uses: android-actions/setup-android@v4.0.4
+      - run: npm install --legacy-peer-deps
+      - run: npm run build
+      - run: npx cap add android || true
+      - run: npx cap sync android
+      - run: chmod +x android/gradlew
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-\${{ github.run_number }}
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}`
+
+      const zipBase64 = await zip.generateAsync({ type: 'base64' })
+      const workflowBase64 = btoa(unescape(encodeURIComponent(workflowYml)))
+
+      // 4. Upload ZIP
+      addLog('Mengunggah file proyek (project.zip)...')
+      const uploadZipRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/project.zip`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ message: 'Upload project zip', content: zipBase64 }),
+      })
+      if (!uploadZipRes.ok) throw new Error('Gagal mengunggah file proyek.')
+
+      // 5. Upload Workflow
+      addLog('Mengunggah konfigurasi workflow...')
+      const uploadWfRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/.github/workflows/build-apk.yml`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ message: 'Add workflow', content: workflowBase64 }),
+      })
+      if (!uploadWfRes.ok) throw new Error('Gagal mengunggah workflow. Pastikan Token punya akses "workflow".')
+
+      addLog('Semua file berhasil diunggah!', 'success')
+      addLog('Menunggu GitHub Actions memulai build...', 'warning')
+
+      // 6. Polling Status Build
+      let isSuccess = false
+      let retries = 0
+      const maxRetries = 40 // Maksimal tunggu ~10 menit (15s x 40)
+
+      while (!isSuccess && retries < maxRetries) {
+        await new Promise((r) => setTimeout(r, 15000)) // Cek tiap 15 detik
+        addLog(`Memeriksa status build... (${retries + 1}/${maxRetries})`)
+        
+        const runsRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/actions/runs`, { headers })
+        const runsData = await runsRes.json()
+        
+        if (runsData.workflow_runs && runsData.workflow_runs.length > 0) {
+          const latestRun = runsData.workflow_runs[0]
+          
+          if (latestRun.status === 'completed') {
+            if (latestRun.conclusion === 'success') {
+              isSuccess = true
+              addLog('Build Sukses! Mempersiapkan link download...', 'success')
+              
+              // Ambil link APK dari Release
+              const releaseRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/releases/latest`, { headers })
+              const releaseData = await releaseRes.json()
+              
+              if (releaseData.assets && releaseData.assets.length > 0) {
+                const apkAsset = releaseData.assets.find((a) => a.name.endsWith('.apk'))
+                if (apkAsset) {
+                  setApkUrl(apkAsset.browser_download_url)
+                  addLog('APK Siap diunduh!', 'success')
+                }
+              }
+            } else {
+              addLog(`Build Gagal. Kesimpulan: ${latestRun.conclusion}`, 'error')
+              setErrorMsg('Build gagal di server GitHub. Periksa log lengkap di repositori Anda.')
+              break
+            }
+          }
+        }
+        retries++
+      }
+
+      if (!isSuccess && retries >= maxRetries) {
+        addLog('Waktu tunggu habis. Build memakan waktu terlalu lama.', 'error')
+      }
+
+    } catch (err) {
+      addLog(err.message, 'error')
+      setErrorMsg(err.message)
+    } finally {
+      setIsBuilding(false)
+    }
   }
 
   return (
@@ -172,7 +305,7 @@ export default function Step5({ data }) {
         </div>
       </div>
 
-      {/* Tampilkan Terminal Log Jika Sedang Build atau Sudah Selesai Simulasi */}
+      {/* Terminal Log (Tampil jika sedang build atau sudah ada log) */}
       {(isBuilding || logs.length > 0) && (
         <div className="animate-fade-in">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-300">
@@ -183,7 +316,7 @@ export default function Step5({ data }) {
         </div>
       )}
 
-      {/* Tombol Aksi */}
+      {/* Tombol Aksi (Sembunyikan jika sedang build / sudah selesai build API) */}
       {!isBuilding && logs.length === 0 && (
         <div className="space-y-3">
           <button
@@ -192,7 +325,7 @@ export default function Step5({ data }) {
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
           >
             <Rocket size={18} />
-            Auto-Build APK (Simulasi)
+            Auto-Build APK (Via GitHub)
           </button>
           
           <div className="relative flex py-2 items-center">
@@ -213,24 +346,31 @@ export default function Step5({ data }) {
         </div>
       )}
 
-      {/* Jika Auto-Build Simulasi Selesai */}
-      {!isBuilding && logs.length > 0 && (
+      {/* Hasil Akhir Auto-Build (Jika APK sudah siap) */}
+      {!isBuilding && apkUrl && (
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
           <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
-          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Simulasi Build Sukses!</h3>
-          <p className="mt-1 text-sm text-emerald-200/70">
-            Ini adalah tampilan ketika API GitHub sudah terhubung. Tombol download APK akan muncul di sini.
+          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Build Sukses!</h3>
+          <p className="mt-1 mb-4 text-sm text-emerald-200/70">
+            APK aplikasi Anda sudah berhasil dirakit oleh GitHub. Silakan unduh.
           </p>
-          <button className="mt-4 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20">
-            Download APK (Placeholder)
-          </button>
+          <a
+            href={apkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
+          >
+            <Download size={18} />
+            Download APK
+          </a>
         </div>
       )}
 
-      {/* Error Manual ZIP */}
+      {/* Error Message */}
       {errorMsg && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 text-center">
-          {errorMsg}
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 text-center">
+          <AlertCircle size={20} />
+          <span>{errorMsg}</span>
         </div>
       )}
     </div>
