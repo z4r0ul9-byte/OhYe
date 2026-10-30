@@ -13,11 +13,12 @@ import {
   Loader2,
   Smartphone,
   FileArchive,
-  Share2,
   Rocket,
   Terminal,
   Download,
   AlertCircle,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react'
 import TerminalLog from '../ui/TerminalLog'
 
@@ -49,6 +50,8 @@ export default function Step5({ data }) {
   const [isBuilding, setIsBuilding] = useState(false)
   const [logs, setLogs] = useState([])
   const [apkUrl, setApkUrl] = useState('')
+  const [repoInfo, setRepoInfo] = useState(null) // Menyimpan info repo untuk dihapus
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
@@ -64,18 +67,16 @@ export default function Step5({ data }) {
     ])
   }
 
-  // --- FUNGSI 1: GENERATE ZIP MANUAL ---
+  // --- GENERATE FILE PROYEK ---
   const generateProjectFiles = async () => {
     const zip = new JSZip()
 
-    // File dasar
     zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
     zip.file('capacitor.config.json', JSON.stringify({ appId: 'com.generated.app', appName: data.appName || 'My App', webDir: 'dist' }, null, 2))
     zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
     zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>`)
     zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
 
-    // App Logic
     let appJsx = ''
     if (data.mode === 'website') {
       appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
@@ -86,7 +87,6 @@ export default function Step5({ data }) {
     }
     zip.file('src/App.jsx', appJsx)
 
-    // File pendukung
     if (data.appIcon) zip.file('public/icon.png', data.appIcon)
     if (data.mode === 'zip' && data.uploadedFile) {
       const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
@@ -102,34 +102,22 @@ export default function Step5({ data }) {
     return zip
   }
 
+  // --- DOWNLOAD ZIP MANUAL ---
   const handleGenerateZip = async () => {
     setIsGenerating(true)
     setErrorMsg('')
 
     try {
       const zip = await generateProjectFiles()
-      
-      // Workflow untuk manual ZIP (Langsung build tanpa unzip)
       zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
 
       const content = await zip.generateAsync({ type: 'blob' })
       const base64Data = await blobToBase64(content)
       const fileName = `${(data.appName || 'app').replace(/\s+/g, '-').toLowerCase()}-project.zip`
 
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: base64Data,
-        directory: Directory.Cache,
-      })
-
+      const savedFile = await Filesystem.writeFile({ path: fileName, data: base64Data, directory: Directory.Cache })
       setSavedFileName(fileName)
-
-      await Share.share({
-        title: 'Simpan Proyek Aplikasi',
-        text: 'Pilih "Simpan ke File" untuk menyimpan proyek.',
-        url: savedFile.uri,
-      })
-
+      await Share.share({ title: 'Simpan Proyek Aplikasi', text: 'Pilih "Simpan ke File" untuk menyimpan proyek.', url: savedFile.uri })
       setIsDone(true)
     } catch (err) {
       setErrorMsg(err.message || 'Terjadi kesalahan.')
@@ -138,50 +126,47 @@ export default function Step5({ data }) {
     }
   }
 
-  // --- FUNGSI 2: AUTO BUILD VIA GITHUB API ---
+  // --- AUTO BUILD VIA GITHUB API (DENGAN AUTO-FIX & DELETE) ---
   const handleAutoBuild = async () => {
     const token = localStorage.getItem('github_token')
     if (!token) {
-      setErrorMsg('Token GitHub belum diatur. Buka menu Pengaturan (ikon roda gigi di kanan atas).')
+      setErrorMsg('Token GitHub belum diatur. Buka menu Pengaturan (ikon roda gigi).')
       return
     }
 
     setIsBuilding(true)
     setLogs([])
     setApkUrl('')
+    setRepoInfo(null)
     setErrorMsg('')
 
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json',
-    }
+    const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' }
 
     try {
-      // 1. Dapatkan Info User
       addLog('Memverifikasi Token GitHub...')
       const userRes = await fetch('https://api.github.com/user', { headers })
       if (!userRes.ok) throw new Error('Token tidak valid atau kadaluarsa.')
       const user = await userRes.json()
       const username = user.login
 
-      // 2. Buat Repositori Baru
       const repoName = `app-builder-${Date.now()}`
       addLog(`Membuat repositori baru: ${username}/${repoName}...`)
       const repoRes = await fetch('https://api.github.com/user/repos', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ name: repoName, private: true, auto_init: false }),
+        method: 'POST', headers, body: JSON.stringify({ name: repoName, private: true, auto_init: false }),
       })
       if (!repoRes.ok) throw new Error('Gagal membuat repositori. Pastikan Token punya akses "repo".')
 
-      // 3. Siapkan File
+      // Simpan info repo untuk fitur hapus nanti
+      setRepoInfo({ owner: username, repo: repoName })
+
       addLog('Mengemas proyek ke dalam ZIP...')
       const zip = await generateProjectFiles()
       
-      // Workflow khusus untuk Auto-Build (menggunakan unzip)
+      // PERBAIKAN: Menambahkan "permissions: contents: write" di bagian atas YAML
       const workflowYml = `name: Build APK
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -211,31 +196,24 @@ jobs:
       const zipBase64 = await zip.generateAsync({ type: 'base64' })
       const workflowBase64 = btoa(unescape(encodeURIComponent(workflowYml)))
 
-      // 4. Upload ZIP
       addLog('Mengunggah file proyek (project.zip)...')
       const uploadZipRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/project.zip`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ message: 'Upload project zip', content: zipBase64 }),
+        method: 'PUT', headers, body: JSON.stringify({ message: 'Upload project zip', content: zipBase64 }),
       })
       if (!uploadZipRes.ok) throw new Error('Gagal mengunggah file proyek.')
 
-      // 5. Upload Workflow
-      addLog('Mengunggah konfigurasi workflow...')
+      addLog('Mengunggah konfigurasi workflow (Auto-Fix applied)...')
       const uploadWfRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/.github/workflows/build-apk.yml`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ message: 'Add workflow', content: workflowBase64 }),
+        method: 'PUT', headers, body: JSON.stringify({ message: 'Add workflow', content: workflowBase64 }),
       })
       if (!uploadWfRes.ok) throw new Error('Gagal mengunggah workflow. Pastikan Token punya akses "workflow".')
 
       addLog('Semua file berhasil diunggah!', 'success')
       addLog('Menunggu GitHub Actions memulai build...', 'warning')
 
-      // 6. Polling Status Build
       let isSuccess = false
       let retries = 0
-      const maxRetries = 40 // Maksimal tunggu ~10 menit (15s x 40)
+      const maxRetries = 40 // ~10 Menit
 
       while (!isSuccess && retries < maxRetries) {
         await new Promise((r) => setTimeout(r, 15000)) // Cek tiap 15 detik
@@ -252,7 +230,6 @@ jobs:
               isSuccess = true
               addLog('Build Sukses! Mempersiapkan link download...', 'success')
               
-              // Ambil link APK dari Release
               const releaseRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/releases/latest`, { headers })
               const releaseData = await releaseRes.json()
               
@@ -285,6 +262,31 @@ jobs:
     }
   }
 
+  // --- FITUR HAPUS REPO OTOMATIS ---
+  const handleDeleteRepo = async () => {
+    if (!repoInfo) return
+    const token = localStorage.getItem('github_token')
+    if (!token) return
+
+    setIsDeleting(true)
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
+      })
+      if (res.ok) {
+        addLog('Repositori berhasil dihapus dari GitHub.', 'success')
+        setRepoInfo(null)
+      } else {
+        addLog('Gagal menghapus repositori.', 'error')
+      }
+    } catch (err) {
+      addLog('Terjadi kesalahan saat menghapus repo.', 'error')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       {/* Header Ringkasan */}
@@ -305,7 +307,7 @@ jobs:
         </div>
       </div>
 
-      {/* Terminal Log (Tampil jika sedang build atau sudah ada log) */}
+      {/* Terminal Log */}
       {(isBuilding || logs.length > 0) && (
         <div className="animate-fade-in">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-300">
@@ -316,7 +318,7 @@ jobs:
         </div>
       )}
 
-      {/* Tombol Aksi (Sembunyikan jika sedang build / sudah selesai build API) */}
+      {/* Tombol Aksi Awal */}
       {!isBuilding && logs.length === 0 && (
         <div className="space-y-3">
           <button
@@ -346,23 +348,40 @@ jobs:
         </div>
       )}
 
-      {/* Hasil Akhir Auto-Build (Jika APK sudah siap) */}
+      {/* Hasil Akhir: APK Siap & Tombol Hapus Repo */}
       {!isBuilding && apkUrl && (
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
           <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
           <h3 className="mt-3 text-lg font-semibold text-emerald-400">Build Sukses!</h3>
           <p className="mt-1 mb-4 text-sm text-emerald-200/70">
-            APK aplikasi Anda sudah berhasil dirakit oleh GitHub. Silakan unduh.
+            APK aplikasi Anda sudah berhasil dirakit oleh GitHub.
           </p>
-          <a
-            href={apkUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
-          >
-            <Download size={18} />
-            Download APK
-          </a>
+          
+          <div className="space-y-3">
+            <a
+              href={apkUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
+            >
+              <Download size={18} />
+              Download APK
+            </a>
+
+            {repoInfo && (
+              <button
+                onClick={handleDeleteRepo}
+                disabled={isDeleting}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 py-3.5 text-sm font-semibold text-red-400 border border-red-500/20 transition hover:bg-red-500/20 disabled:opacity-50"
+              >
+                {isDeleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
+                {isDeleting ? 'Menghapus Repositori...' : 'Hapus Repositori dari GitHub'}
+              </button>
+            )}
+          </div>
+          <p className="mt-3 text-[11px] text-emerald-200/50">
+            *Penting: Pastikan Anda sudah mengunduh APK sebelum menghapus repositori. Jika repo dihapus, link download akan mati.
+          </p>
         </div>
       )}
 
