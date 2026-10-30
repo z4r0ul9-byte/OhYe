@@ -10,6 +10,8 @@ import {
   Download,
   Loader2,
   Smartphone,
+  Copy,
+  Check,
 } from 'lucide-react'
 
 const MODE_LABELS = {
@@ -24,17 +26,17 @@ const MODE_LABELS = {
 export default function Step5({ data }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDone, setIsDone] = useState(false)
+  const [jsonOutput, setJsonOutput] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
 
-  // Fungsi untuk mengunduh file konfigurasi (JSON)
   const handleGenerate = () => {
     setIsGenerating(true)
 
-    // Simulasi proses build (delay 1.5 detik agar UI terasa natural)
     setTimeout(() => {
-      // Siapkan data yang akan disimpan
+      // 1. Siapkan data JSON
       const configData = {
         appName: data.appName,
         mode: data.mode,
@@ -48,22 +50,33 @@ export default function Step5({ data }) {
         generatedAt: new Date().toISOString(),
       }
 
-      // Buat file JSON dan picu download
-      const blob = new Blob([JSON.stringify(configData, null, 2)], {
-        type: 'application/json',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${data.appName.replace(/\s+/g, '-').toLowerCase() || 'app'}-config.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const jsonString = JSON.stringify(configData, null, 2)
+      setJsonOutput(jsonString)
+
+      // 2. Tetap coba jalankan download otomatis (kalau di Web Browser akan jalan)
+      try {
+        const blob = new Blob([jsonString], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${data.appName.replace(/\s+/g, '-').toLowerCase() || 'app'}-config.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } catch (err) {
+        console.log('Auto-download diblokir oleh WebView, silakan copy manual.')
+      }
 
       setIsGenerating(false)
       setIsDone(true)
-    }, 1500)
+    }, 1200)
+  }
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(jsonOutput)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
@@ -72,11 +85,7 @@ export default function Step5({ data }) {
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
         <div className="mx-auto grid h-16 w-16 place-items-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-lg">
           {data.appIconPreview ? (
-            <img
-              src={data.appIconPreview}
-              alt="Ikon"
-              className="h-full w-full object-cover"
-            />
+            <img src={data.appIconPreview} alt="Ikon" className="h-full w-full object-cover" />
           ) : (
             <Smartphone size={24} className="text-zinc-600" />
           )}
@@ -131,7 +140,7 @@ export default function Step5({ data }) {
         </div>
       </div>
 
-      {/* Tombol Generate (Kustom di dalam step agar lebih interaktif) */}
+      {/* Tombol Generate & Output */}
       {!isDone ? (
         <button
           type="button"
@@ -147,17 +156,35 @@ export default function Step5({ data }) {
           ) : (
             <>
               <Download size={18} />
-              Download Konfigurasi Aplikasi
+              Generate Konfigurasi Aplikasi
             </>
           )}
         </button>
       ) : (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
-          <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
-          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Berhasil!</h3>
-          <p className="mt-1 text-sm text-emerald-200/70">
-            File konfigurasi (.json) telah diunduh. File ini berisi semua pengaturan aplikasi kamu.
-          </p>
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 animate-fade-in">
+          <div className="flex flex-col items-center text-center">
+            <CheckCircle2 size={32} className="text-emerald-400" />
+            <h3 className="mt-3 text-lg font-semibold text-emerald-400">Berhasil Dibuat!</h3>
+            <p className="mt-1 text-sm text-emerald-200/70">
+              File konfigurasi sudah siap. Karena berjalan di Android, silakan salin teks di bawah ini.
+            </p>
+          </div>
+
+          {/* Kotak Output JSON */}
+          <div className="mt-5 relative">
+            <textarea
+              readOnly
+              value={jsonOutput}
+              className="w-full h-48 rounded-xl border border-zinc-700 bg-zinc-950 p-4 text-xs font-mono text-zinc-300 focus:outline-none"
+            />
+            <button
+              onClick={handleCopy}
+              className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-white shadow-md transition hover:bg-zinc-700 active:scale-95"
+            >
+              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+              {copied ? 'Tersalin!' : 'Salin Teks'}
+            </button>
+          </div>
         </div>
       )}
     </div>
