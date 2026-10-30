@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import WizardLayout from './components/Wizard/WizardLayout'
 import Step1 from './components/Wizard/Step1'
+import Step5 from './components/Wizard/Step5'
 import PlaceholderStep from './components/Wizard/PlaceholderStep'
 
 const INITIAL_DATA = {
-  // Step 1 — Aplikasi
   mode: '',
   websiteUrl: '',
   html: '',
@@ -14,12 +14,9 @@ const INITIAL_DATA = {
   appName: '',
   appIcon: null,
   appIconPreview: null,
-  // Step 2 — Tampilan (persiapan sesi berikutnya)
   splashColor: '#5c5cff',
   themeColor: '#5c5cff',
-  // Step 3 — Fitur
   features: {},
-  // Step 4 — Izin
   permissions: [],
 }
 
@@ -34,6 +31,10 @@ const STEPS = [
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState(INITIAL_DATA)
+  
+  // State untuk mengontrol proses generate di Step 5
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isDone, setIsDone] = useState(false)
 
   const update = (patch) => setFormData((prev) => ({ ...prev, ...patch }))
 
@@ -43,23 +44,19 @@ export default function App() {
     if (formData.appName.trim().length === 0) return false
 
     switch (formData.mode) {
-      case 'website':
-        return formData.websiteUrl.trim().length > 0
-      case 'html':
-        return formData.html.trim().length > 0
-      case 'livedev':
-        return true
+      case 'website': return formData.websiteUrl.trim().length > 0
+      case 'html': return formData.html.trim().length > 0
+      case 'livedev': return true
       case 'zip':
       case 'docs':
-      case 'gallery':
-        return Boolean(formData.uploadedFile)
-      default:
-        return false
+      case 'gallery': return Boolean(formData.uploadedFile)
+      default: return false
     }
   })()
 
   const canAdvance = () => {
     if (currentStep === 1) return isStep1Valid
+    if (currentStep === 5) return !isGenerating && !isDone // Disable next kalau sedang generate/done
     return true
   }
 
@@ -81,6 +78,8 @@ export default function App() {
     switch (currentStep) {
       case 1:
         return <Step1 data={formData} update={update} />
+      case 5:
+        return <Step5 data={formData} />
       default:
         return (
           <PlaceholderStep
@@ -99,6 +98,7 @@ export default function App() {
       onPrev={handlePrev}
       canNext={canAdvance()}
       isLast={currentStep === STEPS.length}
+      hideNextButton={currentStep === 5} // Sembunyikan tombol Lanjut/Generate di footer karena sudah ada di dalam Step5
     >
       {renderStep()}
     </WizardLayout>
