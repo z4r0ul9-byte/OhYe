@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import JSZip from 'jszip'
+import { Filesystem, Directory } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 import {
   Globe,
   FolderArchive,
@@ -8,10 +10,10 @@ import {
   Code2,
   Radio,
   CheckCircle2,
-  Download,
   Loader2,
   Smartphone,
   FileArchive,
+  Share2,
 } from 'lucide-react'
 
 const MODE_LABELS = {
@@ -23,10 +25,21 @@ const MODE_LABELS = {
   livedev: { label: 'Live Dev', icon: Radio },
 }
 
+// Fungsi bantu untuk mengubah Blob menjadi Base64 (dibutuhkan oleh Capacitor Filesystem)
+const blobToBase64 = (blob) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => resolve(reader.result.split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(blob)
+  })
+}
+
 export default function Step5({ data }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDone, setIsDone] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [savedFileName, setSavedFileName] = useState('')
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
@@ -38,7 +51,7 @@ export default function Step5({ data }) {
     try {
       const zip = new JSZip()
 
-      // 1. package.json untuk proyek yang di-generate
+      // 1. package.json
       zip.file(
         'package.json',
         `{
@@ -122,7 +135,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 )`
       )
 
-      // 6. src/App.jsx (Dinamis berdasarkan pilihan mode)
+      // 6. src/App.jsx (Dinamis)
       let appJsx = ''
       if (data.mode === 'website') {
         appJsx = `export default function App() {
@@ -135,7 +148,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   )
 }`
       } else if (data.mode === 'html') {
-        const escapedHtml = data.html.replace(/`/g, '\\`')
+        const escapedHtml = (data.html || '').replace(/`/g, '\\`')
         appJsx = `export default function App() {
   return (
     <div 
@@ -151,14 +164,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <h1>${data.appName || 'Aplikasi'}</h1>
       <p>Mode: ${data.mode}</p>
       <p>File: ${data.uploadedFileName || '-'}</p>
-      <p>File yang di-upload (${data.uploadedFileName || 'file'}) perlu dimasukkan secara manual ke folder public/ agar dapat diakses secara offline.</p>
     </div>
   )
 }`
       }
       zip.file('src/App.jsx', appJsx)
 
-      // 7. .github/workflows/build-apk.yml (Menggunakan v4.0.4 untuk Android SDK)
+      // 7. Workflow GitHub Actions
       zip.file(
         '.github/workflows/build-apk.yml',
         `name: Build APK
@@ -173,40 +185,28 @@ jobs:
     name: Build Debug APK
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Setup Java 17 (Temurin)
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4.0.4
-      - name: Install dependencies
-        run: npm install
-      - name: Build web (Vite)
-        run: npm run build
-      - name: Add Android platform
-        run: npx cap add android || true
-      - name: Sync Capacitor
-        run: npx cap sync android
-      - name: Make gradlew executable
-        run: chmod +x android/gradlew
-      - name: Build Debug APK
+      - uses: android-actions/setup-android@v4.0.4
+      - run: npm install
+      - run: npm run build
+      - run: npx cap add android || true
+      - run: npx cap sync android
+      - run: chmod +x android/gradlew
+      - run: ./gradlew assembleDebug --no-daemon
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
-      - name: Upload APK as artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
-      - name: Create GitHub Release
+      - uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
         with:
           tag_name: build-\${{ github.run_number }}
           name: Build #\${{ github.run_number }}
@@ -216,18 +216,27 @@ jobs:
 `
       )
 
-      // 8. Generate ZIP dan picu download
+      // 8. Generate ZIP dan simpan via Capacitor
       const content = await zip.generateAsync({ type: 'blob' })
-      const url = URL.createObjectURL(content)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${(data.appName || 'app')
-        .replace(/\s+/g, '-')
-        .toLowerCase()}-project.zip`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      const base64Data = await blobToBase64(content)
+      const fileName = `${(data.appName || 'app').replace(/\s+/g, '-').toLowerCase()}-project.zip`
+
+      // Simpan ke cache internal aplikasi
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache,
+      })
+
+      setSavedFileName(fileName)
+
+      // Buka menu Share Android agar user bisa menyimpan ke folder Download/Drive/WA
+      await Share.share({
+        title: 'Simpan Proyek Aplikasi',
+        text: 'Pilih "Simpan ke File" atau bagikan ke penyimpanan lain.',
+        url: savedFile.uri,
+        dialogTitle: 'Simpan atau Bagikan Proyek',
+      })
 
       setIsDone(true)
     } catch (err) {
@@ -240,7 +249,6 @@ jobs:
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header Ringkasan */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
         <div className="mx-auto grid h-16 w-16 place-items-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-lg">
           {data.appIconPreview ? (
@@ -258,7 +266,6 @@ jobs:
         </div>
       </div>
 
-      {/* Detail Ringkasan */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
         <div className="border-b border-zinc-800/50 px-5 py-3">
           <h3 className="text-sm font-semibold text-zinc-300">Ringkasan Konfigurasi</h3>
@@ -299,7 +306,6 @@ jobs:
         </div>
       </div>
 
-      {/* Tombol Generate */}
       {!isDone ? (
         <button
           type="button"
@@ -322,10 +328,17 @@ jobs:
       ) : (
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
           <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
-          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Berhasil Di-generate!</h3>
+          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Proyek Siap!</h3>
           <p className="mt-1 text-sm text-emerald-200/70">
-            File ZIP berisi proyek aplikasimu sudah diunduh. Silakan cari file tersebut di folder <b>Download</b> HP kamu.
+            File <b>{savedFileName}</b> telah berhasil dibuat. Jika belum tersimpan di folder Download, ketuk tombol di bawah untuk menyimpannya kembali.
           </p>
+          <button
+            onClick={handleGenerate}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500/20 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/30"
+          >
+            <Share2 size={16} />
+            Simpan Ulang / Bagikan File
+          </button>
         </div>
       )}
 
