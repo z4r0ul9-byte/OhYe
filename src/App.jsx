@@ -3,8 +3,8 @@ import WizardLayout from './components/Wizard/WizardLayout'
 import Step1 from './components/Wizard/Step1'
 import Step2 from './components/Wizard/Step2'
 import Step3 from './components/Wizard/Step3'
+import Step4 from './components/Wizard/Step4'
 import Step5 from './components/Wizard/Step5'
-import PlaceholderStep from './components/Wizard/PlaceholderStep'
 
 const INITIAL_DATA = {
   mode: '',
@@ -76,21 +76,12 @@ export default function App() {
 
   const renderStep = () => {
     switch (currentStep) {
-      case 1:
-        return <Step1 data={formData} update={update} />
-      case 2:
-        return <Step2 data={formData} update={update} />
-      case 3:
-        return <Step3 data={formData} update={update} />
-      case 5:
-        return <Step5 data={formData} />
-      default:
-        return (
-          <PlaceholderStep
-            step={currentStep}
-            title={STEPS[currentStep - 1].label}
-          />
-        )
+      case 1: return <Step1 data={formData} update={update} />
+      case 2: return <Step2 data={formData} update={update} />
+      case 3: return <Step3 data={formData} update={update} />
+      case 4: return <Step4 data={formData} update={update} />
+      case 5: return <Step5 data={formData} />
+      default: return null
     }
   }
 
