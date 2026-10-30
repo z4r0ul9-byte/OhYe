@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import JSZip from 'jszip'
 import {
   Globe,
   FolderArchive,
@@ -10,8 +11,7 @@ import {
   Download,
   Loader2,
   Smartphone,
-  Copy,
-  Check,
+  FileArchive,
 } from 'lucide-react'
 
 const MODE_LABELS = {
@@ -26,57 +26,216 @@ const MODE_LABELS = {
 export default function Step5({ data }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDone, setIsDone] = useState(false)
-  const [jsonOutput, setJsonOutput] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsGenerating(true)
+    setErrorMsg('')
 
-    setTimeout(() => {
-      // 1. Siapkan data JSON
-      const configData = {
-        appName: data.appName,
-        mode: data.mode,
-        websiteUrl: data.websiteUrl,
-        html: data.html,
-        uploadedFileName: data.uploadedFileName,
-        splashColor: data.splashColor,
-        themeColor: data.themeColor,
-        features: data.features,
-        permissions: data.permissions,
-        generatedAt: new Date().toISOString(),
-      }
+    try {
+      const zip = new JSZip()
 
-      const jsonString = JSON.stringify(configData, null, 2)
-      setJsonOutput(jsonString)
-
-      // 2. Tetap coba jalankan download otomatis (kalau di Web Browser akan jalan)
-      try {
-        const blob = new Blob([jsonString], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${data.appName.replace(/\s+/g, '-').toLowerCase() || 'app'}-config.json`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      } catch (err) {
-        console.log('Auto-download diblokir oleh WebView, silakan copy manual.')
-      }
-
-      setIsGenerating(false)
-      setIsDone(true)
-    }, 1200)
+      // 1. package.json untuk proyek yang di-generate
+      zip.file(
+        'package.json',
+        `{
+  "name": "generated-app",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
   }
+}`
+      )
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(jsonOutput)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+      // 2. capacitor.config.json
+      zip.file(
+        'capacitor.config.json',
+        JSON.stringify(
+          {
+            appId: 'com.generated.app',
+            appName: data.appName || 'My App',
+            webDir: 'dist',
+          },
+          null,
+          2
+        )
+      )
+
+      // 3. vite.config.js
+      zip.file(
+        'vite.config.js',
+        `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  base: './',
+})`
+      )
+
+      // 4. index.html
+      zip.file(
+        'index.html',
+        `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>${data.appName || 'App'}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>`
+      )
+
+      // 5. src/main.jsx
+      zip.file(
+        'src/main.jsx',
+        `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)`
+      )
+
+      // 6. src/App.jsx (Dinamis berdasarkan pilihan mode)
+      let appJsx = ''
+      if (data.mode === 'website') {
+        appJsx = `export default function App() {
+  return (
+    <iframe
+      src="${data.websiteUrl}"
+      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
+      allow="geolocation; microphone; camera; midi; encrypted-media; fullscreen"
+    />
+  )
+}`
+      } else if (data.mode === 'html') {
+        const escapedHtml = data.html.replace(/`/g, '\\`')
+        appJsx = `export default function App() {
+  return (
+    <div 
+      dangerouslySetInnerHTML={{ __html: \`${escapedHtml}\` }} 
+      style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }} 
+    />
+  )
+}`
+      } else {
+        appJsx = `export default function App() {
+  return (
+    <div style={{ padding: '20px', color: 'white', backgroundColor: '#000', height: '100vh' }}>
+      <h1>${data.appName || 'Aplikasi'}</h1>
+      <p>Mode: ${data.mode}</p>
+      <p>File: ${data.uploadedFileName || '-'}</p>
+      <p>File yang di-upload (${data.uploadedFileName || 'file'}) perlu dimasukkan secara manual ke folder public/ agar dapat diakses secara offline.</p>
+    </div>
+  )
+}`
+      }
+      zip.file('src/App.jsx', appJsx)
+
+      // 7. .github/workflows/build-apk.yml (Menggunakan v4.0.4 untuk Android SDK)
+      zip.file(
+        '.github/workflows/build-apk.yml',
+        `name: Build APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4.0.4
+      - name: Install dependencies
+        run: npm install
+      - name: Build web (Vite)
+        run: npm run build
+      - name: Add Android platform
+        run: npx cap add android || true
+      - name: Sync Capacitor
+        run: npx cap sync android
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+      - name: Build Debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-\${{ github.run_number }}
+          name: Build #\${{ github.run_number }}
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+`
+      )
+
+      // 8. Generate ZIP dan picu download
+      const content = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(content)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${(data.appName || 'app')
+        .replace(/\s+/g, '-')
+        .toLowerCase()}-project.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      setIsDone(true)
+    } catch (err) {
+      console.error(err)
+      setErrorMsg(err.message || 'Terjadi kesalahan saat membuat file ZIP.')
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   return (
@@ -140,7 +299,7 @@ export default function Step5({ data }) {
         </div>
       </div>
 
-      {/* Tombol Generate & Output */}
+      {/* Tombol Generate */}
       {!isDone ? (
         <button
           type="button"
@@ -151,40 +310,28 @@ export default function Step5({ data }) {
           {isGenerating ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              Memproses Konfigurasi...
+              Mengemas Proyek (.zip)...
             </>
           ) : (
             <>
-              <Download size={18} />
-              Generate Konfigurasi Aplikasi
+              <FileArchive size={18} />
+              Download Proyek (ZIP)
             </>
           )}
         </button>
       ) : (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 animate-fade-in">
-          <div className="flex flex-col items-center text-center">
-            <CheckCircle2 size={32} className="text-emerald-400" />
-            <h3 className="mt-3 text-lg font-semibold text-emerald-400">Berhasil Dibuat!</h3>
-            <p className="mt-1 text-sm text-emerald-200/70">
-              File konfigurasi sudah siap. Karena berjalan di Android, silakan salin teks di bawah ini.
-            </p>
-          </div>
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
+          <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
+          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Berhasil Di-generate!</h3>
+          <p className="mt-1 text-sm text-emerald-200/70">
+            File ZIP berisi proyek aplikasimu sudah diunduh. Silakan cari file tersebut di folder <b>Download</b> HP kamu.
+          </p>
+        </div>
+      )}
 
-          {/* Kotak Output JSON */}
-          <div className="mt-5 relative">
-            <textarea
-              readOnly
-              value={jsonOutput}
-              className="w-full h-48 rounded-xl border border-zinc-700 bg-zinc-950 p-4 text-xs font-mono text-zinc-300 focus:outline-none"
-            />
-            <button
-              onClick={handleCopy}
-              className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-white shadow-md transition hover:bg-zinc-700 active:scale-95"
-            >
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              {copied ? 'Tersalin!' : 'Salin Teks'}
-            </button>
-          </div>
+      {errorMsg && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 text-center">
+          {errorMsg}
         </div>
       )}
     </div>
