@@ -18,7 +18,6 @@ import {
   Download,
   AlertCircle,
   Trash2,
-  ExternalLink,
 } from 'lucide-react'
 import TerminalLog from '../ui/TerminalLog'
 
@@ -46,11 +45,10 @@ export default function Step5({ data }) {
   const [errorMsg, setErrorMsg] = useState('')
   const [savedFileName, setSavedFileName] = useState('')
   
-  // State Build
   const [isBuilding, setIsBuilding] = useState(false)
   const [logs, setLogs] = useState([])
   const [apkUrl, setApkUrl] = useState('')
-  const [repoInfo, setRepoInfo] = useState(null) // Menyimpan info repo untuk dihapus
+  const [repoInfo, setRepoInfo] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
@@ -71,33 +69,67 @@ export default function Step5({ data }) {
   const generateProjectFiles = async () => {
     const zip = new JSZip()
 
+    // 1. PERBAIKAN CAPACITOR CONFIG (Wajib untuk iframe lokal)
+    zip.file('capacitor.config.json', JSON.stringify({ 
+      appId: 'com.generated.app', 
+      appName: data.appName || 'My App', 
+      webDir: 'dist',
+      server: {
+        androidScheme: 'https',
+        allowNavigation: ['*']
+      },
+      android: {
+        allowMixedContent: true
+      }
+    }, null, 2))
+
+    // 2. PACKAGE JSON
     zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
-    zip.file('capacitor.config.json', JSON.stringify({ appId: 'com.generated.app', appName: data.appName || 'My App', webDir: 'dist' }, null, 2))
+    
     zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
-    zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>`)
+    
+    // 3. INDEX HTML (Tambahkan loading text sebagai fallback)
+    zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body style="background-color: #000; color: #fff; font-family: sans-serif;">\n<div id="root"><div style="text-align:center; padding: 50px;">Memuat Aplikasi...</div></div>\n<script type="module" src="/src/main.jsx"></script></body>\n</html>`)
+    
     zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
 
+    // 4. LOGIKA APP.JSX
     let appJsx = ''
+    
     if (data.mode === 'website') {
-      appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
+      // Untuk mode website, gunakan iframe dengan http/https
+      appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} allow="geolocation; microphone; camera" />) }`
     } else if (data.mode === 'html') {
-      appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh' }} />) }`
+      appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh', backgroundColor: '#fff' }} />) }`
+    } else if (data.mode === 'zip' && data.uploadedFile) {
+      // PERBAIKAN: Deteksi lokasi index.html secara otomatis (jika di dalam folder)
+      const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
+      const filePromises = []
+      let indexHtmlPath = 'index.html' // Default jika di luar
+
+      uploadedZip.forEach((relativePath, file) => {
+        if (!file.dir) {
+          if (relativePath.toLowerCase().endsWith('index.html')) {
+            indexHtmlPath = relativePath; // Update path jika ditemukan di dalam folder
+          }
+          filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
+        }
+      })
+      await Promise.all(filePromises)
+      
+      // Gunakan path yang ditemukan
+      appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
+      zip.file('src/App.jsx', appJsx)
     } else {
       appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
     }
-    zip.file('src/App.jsx', appJsx)
-
-    if (data.appIcon) zip.file('public/icon.png', data.appIcon)
-    if (data.mode === 'zip' && data.uploadedFile) {
-      const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
-      const filePromises = []
-      uploadedZip.forEach((relativePath, file) => {
-        if (!file.dir) filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
-      })
-      await Promise.all(filePromises)
-      appJsx = `export default function App() { return (<iframe src="./offline/index.html" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
+    
+    // Simpan App.jsx utama (untuk mode selain zip)
+    if (data.mode !== 'zip') {
       zip.file('src/App.jsx', appJsx)
     }
+
+    if (data.appIcon) zip.file('public/icon.png', data.appIcon)
 
     return zip
   }
@@ -126,7 +158,7 @@ export default function Step5({ data }) {
     }
   }
 
-  // --- AUTO BUILD VIA GITHUB API (DENGAN AUTO-FIX & DELETE) ---
+  // --- AUTO BUILD VIA GITHUB API ---
   const handleAutoBuild = async () => {
     const token = localStorage.getItem('github_token')
     if (!token) {
@@ -156,13 +188,11 @@ export default function Step5({ data }) {
       })
       if (!repoRes.ok) throw new Error('Gagal membuat repositori. Pastikan Token punya akses "repo".')
 
-      // Simpan info repo untuk fitur hapus nanti
       setRepoInfo({ owner: username, repo: repoName })
 
       addLog('Mengemas proyek ke dalam ZIP...')
       const zip = await generateProjectFiles()
       
-      // PERBAIKAN: Menambahkan "permissions: contents: write" di bagian atas YAML
       const workflowYml = `name: Build APK
 on: [push, workflow_dispatch]
 permissions:
@@ -213,10 +243,10 @@ jobs:
 
       let isSuccess = false
       let retries = 0
-      const maxRetries = 40 // ~10 Menit
+      const maxRetries = 40
 
       while (!isSuccess && retries < maxRetries) {
-        await new Promise((r) => setTimeout(r, 15000)) // Cek tiap 15 detik
+        await new Promise((r) => setTimeout(r, 15000))
         addLog(`Memeriksa status build... (${retries + 1}/${maxRetries})`)
         
         const runsRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/actions/runs`, { headers })
@@ -249,11 +279,6 @@ jobs:
         }
         retries++
       }
-
-      if (!isSuccess && retries >= maxRetries) {
-        addLog('Waktu tunggu habis. Build memakan waktu terlalu lama.', 'error')
-      }
-
     } catch (err) {
       addLog(err.message, 'error')
       setErrorMsg(err.message)
@@ -262,7 +287,6 @@ jobs:
     }
   }
 
-  // --- FITUR HAPUS REPO OTOMATIS ---
   const handleDeleteRepo = async () => {
     if (!repoInfo) return
     const token = localStorage.getItem('github_token')
@@ -271,8 +295,7 @@ jobs:
     setIsDeleting(true)
     try {
       const res = await fetch(`https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
       })
       if (res.ok) {
         addLog('Repositori berhasil dihapus dari GitHub.', 'success')
@@ -289,45 +312,29 @@ jobs:
 
   return (
     <div className="space-y-6 animate-fade-in pb-10">
-      {/* Header Ringkasan */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
         <div className="mx-auto grid h-16 w-16 place-items-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-lg">
-          {data.appIconPreview ? (
-            <img src={data.appIconPreview} alt="Ikon" className="h-full w-full object-cover" />
-          ) : (
-            <Smartphone size={24} className="text-zinc-600" />
-          )}
+          {data.appIconPreview ? <img src={data.appIconPreview} alt="Ikon" className="h-full w-full object-cover" /> : <Smartphone size={24} className="text-zinc-600" />}
         </div>
-        <h2 className="mt-4 text-xl font-bold tracking-tight text-white">
-          {data.appName || 'Aplikasi Tanpa Nama'}
-        </h2>
+        <h2 className="mt-4 text-xl font-bold tracking-tight text-white">{data.appName || 'Aplikasi Tanpa Nama'}</h2>
         <div className="mt-1.5 flex items-center justify-center gap-1.5 text-sm text-primary">
-          <ModeIcon size={14} />
-          <span>{modeInfo.label}</span>
+          <ModeIcon size={14} /> <span>{modeInfo.label}</span>
         </div>
       </div>
 
-      {/* Terminal Log */}
       {(isBuilding || logs.length > 0) && (
         <div className="animate-fade-in">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-300">
-            <Terminal size={16} className="text-primary" />
-            Proses Auto-Build
+            <Terminal size={16} className="text-primary" /> Proses Auto-Build
           </div>
           <TerminalLog logs={logs} isBuilding={isBuilding} />
         </div>
       )}
 
-      {/* Tombol Aksi Awal */}
       {!isBuilding && logs.length === 0 && (
         <div className="space-y-3">
-          <button
-            type="button"
-            onClick={handleAutoBuild}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
-          >
-            <Rocket size={18} />
-            Auto-Build APK (Via GitHub)
+          <button type="button" onClick={handleAutoBuild} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600">
+            <Rocket size={18} /> Auto-Build APK (Via GitHub)
           </button>
           
           <div className="relative flex py-2 items-center">
@@ -336,60 +343,37 @@ jobs:
             <div className="flex-grow border-t border-zinc-800"></div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleGenerateZip}
-            disabled={isGenerating}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800 py-3.5 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-50"
-          >
+          <button type="button" onClick={handleGenerateZip} disabled={isGenerating} className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800 py-3.5 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-50">
             {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <FileArchive size={18} />}
             {isGenerating ? 'Mengemas ZIP...' : 'Download Proyek (Manual)'}
           </button>
         </div>
       )}
 
-      {/* Hasil Akhir: APK Siap & Tombol Hapus Repo */}
       {!isBuilding && apkUrl && (
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
           <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
           <h3 className="mt-3 text-lg font-semibold text-emerald-400">Build Sukses!</h3>
-          <p className="mt-1 mb-4 text-sm text-emerald-200/70">
-            APK aplikasi Anda sudah berhasil dirakit oleh GitHub.
-          </p>
+          <p className="mt-1 mb-4 text-sm text-emerald-200/70">APK aplikasi Anda sudah berhasil dirakit oleh GitHub.</p>
           
           <div className="space-y-3">
-            <a
-              href={apkUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
-            >
-              <Download size={18} />
-              Download APK
+            <a href={apkUrl} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600">
+              <Download size={18} /> Download APK
             </a>
 
             {repoInfo && (
-              <button
-                onClick={handleDeleteRepo}
-                disabled={isDeleting}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 py-3.5 text-sm font-semibold text-red-400 border border-red-500/20 transition hover:bg-red-500/20 disabled:opacity-50"
-              >
+              <button onClick={handleDeleteRepo} disabled={isDeleting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-500/10 py-3.5 text-sm font-semibold text-red-400 border border-red-500/20 transition hover:bg-red-500/20 disabled:opacity-50">
                 {isDeleting ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />}
                 {isDeleting ? 'Menghapus Repositori...' : 'Hapus Repositori dari GitHub'}
               </button>
             )}
           </div>
-          <p className="mt-3 text-[11px] text-emerald-200/50">
-            *Penting: Pastikan Anda sudah mengunduh APK sebelum menghapus repositori. Jika repo dihapus, link download akan mati.
-          </p>
         </div>
       )}
 
-      {/* Error Message */}
       {errorMsg && (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 text-center">
-          <AlertCircle size={20} />
-          <span>{errorMsg}</span>
+          <AlertCircle size={20} /> <span>{errorMsg}</span>
         </div>
       )}
     </div>
