@@ -1,10 +1,6 @@
 import { ChevronLeft, ChevronRight, Smartphone } from 'lucide-react'
 import StepIndicator from './StepIndicator'
 
-/**
- * Shell utama wizard: header sticky, step indicator, konten, footer fixed.
- * Tema dark + aksen primary (#5c5cff).
- */
 export default function WizardLayout({
   steps,
   currentStep,
@@ -12,6 +8,7 @@ export default function WizardLayout({
   onNext,
   canNext,
   isLast,
+  hideNextButton,
   children,
 }) {
   return (
@@ -56,15 +53,19 @@ export default function WizardLayout({
             {currentStep} / {steps.length}
           </div>
 
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!canNext}
-            className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary/25 transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
-          >
-            {isLast ? 'Generate' : 'Lanjut'}
-            <ChevronRight size={16} />
-          </button>
+          {!hideNextButton ? (
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canNext}
+              className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-primary/25 transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
+            >
+              {isLast ? 'Generate' : 'Lanjut'}
+              <ChevronRight size={16} />
+            </button>
+          ) : (
+            <div className="w-[100px]"></div> /* Spacer agar layout tetap seimbang saat tombol disembunyikan */
+          )}
         </div>
       </footer>
     </div>
