@@ -14,7 +14,10 @@ import {
   Smartphone,
   FileArchive,
   Share2,
+  Rocket,
+  Terminal,
 } from 'lucide-react'
+import TerminalLog from '../ui/TerminalLog'
 
 const MODE_LABELS = {
   website: { label: 'Situs Web', icon: Globe },
@@ -39,236 +42,55 @@ export default function Step5({ data }) {
   const [isDone, setIsDone] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [savedFileName, setSavedFileName] = useState('')
+  
+  // State untuk Simulasi Build & Terminal
+  const [isBuilding, setIsBuilding] = useState(false)
+  const [logs, setLogs] = useState([])
 
   const modeInfo = MODE_LABELS[data.mode] || { label: '-', icon: Smartphone }
   const ModeIcon = modeInfo.icon
 
-  const handleGenerate = async () => {
+  const handleGenerateZip = async () => {
     setIsGenerating(true)
     setErrorMsg('')
 
     try {
       const zip = new JSZip()
 
-      // 1. package.json
-      zip.file(
-        'package.json',
-        `{
-  "name": "generated-app",
-  "private": true,
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build"
-  },
-  "dependencies": {
-    "@capacitor/android": "^6.1.2",
-    "@capacitor/core": "^6.1.2",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
-  "devDependencies": {
-    "@capacitor/cli": "^6.1.2",
-    "@vitejs/plugin-react": "^4.3.2",
-    "typescript": "^5.6.2",
-    "vite": "^5.4.8"
-  }
-}`
-      )
+      // File dasar
+      zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
+      zip.file('capacitor.config.json', JSON.stringify({ appId: 'com.generated.app', appName: data.appName || 'My App', webDir: 'dist' }, null, 2))
+      zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
+      zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body>\n</html>`)
+      zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
 
-      // 2. capacitor.config.json
-      zip.file(
-        'capacitor.config.json',
-        JSON.stringify(
-          {
-            appId: 'com.generated.app',
-            appName: data.appName || 'My App',
-            webDir: 'dist',
-          },
-          null,
-          2
-        )
-      )
-
-      // 3. vite.config.js
-      zip.file(
-        'vite.config.js',
-        `import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  base: './',
-})`
-      )
-
-      // 4. index.html
-      zip.file(
-        'index.html',
-        `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>${data.appName || 'App'}</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>`
-      )
-
-      // 5. src/main.jsx
-      zip.file(
-        'src/main.jsx',
-        `import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)`
-      )
-
-      // 6. Public Assets (Icon & Uploaded Files)
-      if (data.appIcon) {
-        zip.file('public/icon.png', data.appIcon)
-      }
-
+      // App Logic
       let appJsx = ''
-
-      // Logika berdasarkan mode
       if (data.mode === 'website') {
-        appJsx = `export default function App() {
-  return (
-    <iframe
-      src="${data.websiteUrl}"
-      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
-      allow="geolocation; microphone; camera; midi; encrypted-media; fullscreen"
-    />
-  )
-}`
+        appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
       } else if (data.mode === 'html') {
-        const escapedHtml = (data.html || '').replace(/`/g, '\\`')
-        appJsx = `export default function App() {
-  return (
-    <div 
-      dangerouslySetInnerHTML={{ __html: \`${escapedHtml}\` }} 
-      style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }} 
-    />
-  )
-}`
-      } else if (data.mode === 'zip' && data.uploadedFile) {
-        // Bongkar file ZIP yang di-upload dan masukkan ke public/offline
-        const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
-        const filePromises = []
-
-        uploadedZip.forEach((relativePath, file) => {
-          if (!file.dir) {
-            filePromises.push(
-              file.async('blob').then((blob) => {
-                zip.file(`public/offline/${relativePath}`, blob)
-              })
-            )
-          }
-        })
-        await Promise.all(filePromises)
-
-        // Tampilkan menggunakan iframe
-        appJsx = `export default function App() {
-  return (
-    <iframe
-      src="./offline/index.html"
-      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
-    />
-  )
-}`
-      } else if ((data.mode === 'docs' || data.mode === 'gallery') && data.uploadedFile) {
-        // Masukkan file dokumen/gambar ke public/uploads
-        zip.file(`public/uploads/${data.uploadedFileName}`, data.uploadedFile)
-
-        if (data.mode === 'docs') {
-          appJsx = `export default function App() {
-  return (
-    <iframe
-      src="./uploads/${data.uploadedFileName}"
-      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
-    />
-  )
-}`
-        } else {
-          appJsx = `export default function App() {
-  return (
-    <div style={{ backgroundColor: '#000', width: '100vw', height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-      <img src="./uploads/${data.uploadedFileName}" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-    </div>
-  )
-}`
-        }
+        appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh' }} />) }`
       } else {
-        appJsx = `export default function App() {
-  return (
-    <div style={{ padding: '20px', color: 'white', backgroundColor: '#000', height: '100vh' }}>
-      <h1>${data.appName || 'Aplikasi'}</h1>
-      <p>Selamat datang di aplikasi Anda.</p>
-    </div>
-  )
-}`
+        appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
       }
-
       zip.file('src/App.jsx', appJsx)
 
-      // 7. Workflow GitHub Actions
-      zip.file(
-        '.github/workflows/build-apk.yml',
-        `name: Build APK
-on:
-  push:
-    branches: [main, master]
-  workflow_dispatch:
-permissions:
-  contents: write
-jobs:
-  build:
-    name: Build Debug APK
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      - uses: android-actions/setup-android@v4.0.4
-      - run: npm install --legacy-peer-deps
-      - run: npm run build
-      - run: npx cap add android || true
-      - run: npx cap sync android
-      - run: chmod +x android/gradlew
-      - run: ./gradlew assembleDebug --no-daemon
-        working-directory: android
-      - uses: actions/upload-artifact@v4
-        with:
-          name: app-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-      - uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        with:
-          tag_name: build-\${{ github.run_number }}
-          name: Build #\${{ github.run_number }}
-          files: android/app/build/outputs/apk/debug/app-debug.apk
-        env:
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-`
-      )
+      // File pendukung
+      if (data.appIcon) zip.file('public/icon.png', data.appIcon)
+      if (data.mode === 'zip' && data.uploadedFile) {
+        const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
+        const filePromises = []
+        uploadedZip.forEach((relativePath, file) => {
+          if (!file.dir) filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
+        })
+        await Promise.all(filePromises)
+        appJsx = `export default function App() { return (<iframe src="./offline/index.html" style={{ width: '100vw', height: '100vh', border: 'none' }} />) }`
+        zip.file('src/App.jsx', appJsx)
+      }
 
-      // 8. Generate ZIP dan simpan
+      // Workflow
+      zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
+
       const content = await zip.generateAsync({ type: 'blob' })
       const base64Data = await blobToBase64(content)
       const fileName = `${(data.appName || 'app').replace(/\s+/g, '-').toLowerCase()}-project.zip`
@@ -283,22 +105,56 @@ jobs:
 
       await Share.share({
         title: 'Simpan Proyek Aplikasi',
-        text: 'Pilih "Simpan ke File" atau bagikan ke penyimpanan lain.',
+        text: 'Pilih "Simpan ke File" untuk menyimpan proyek.',
         url: savedFile.uri,
-        dialogTitle: 'Simpan atau Bagikan Proyek',
       })
 
       setIsDone(true)
     } catch (err) {
-      console.error(err)
-      setErrorMsg(err.message || 'Terjadi kesalahan saat memproses file. Pastikan file ZIP yang di-upload valid.')
+      setErrorMsg(err.message || 'Terjadi kesalahan.')
     } finally {
       setIsGenerating(false)
     }
   }
 
+  // ===== SIMULASI AUTO-BUILD DENGAN TERMINAL LOG =====
+  const handleAutoBuild = () => {
+    setIsBuilding(true)
+    setLogs([])
+
+    const buildSteps = [
+      { delay: 500, type: 'info', text: 'Menghubungkan ke GitHub API...' },
+      { delay: 1200, type: 'success', text: 'Autentikasi Token Berhasil.' },
+      { delay: 2000, type: 'info', text: 'Membuat repositori workspace...' },
+      { delay: 2800, type: 'info', text: 'Mengunggah 24 file proyek...' },
+      { delay: 4000, type: 'info', text: 'Memicu GitHub Actions workflow...' },
+      { delay: 5000, type: 'warning', text: 'Menunggu server build (Estimasi: 2-3 menit)...' },
+      { delay: 6500, type: 'info', text: '> setup-node@v4 (Node.js 20)' },
+      { delay: 7500, type: 'info', text: '> install dependencies (npm install --legacy-peer-deps)' },
+      { delay: 8500, type: 'info', text: '> build web (vite build)' },
+      { delay: 9500, type: 'info', text: '> build android (gradlew assembleDebug)' },
+      { delay: 11000, type: 'success', text: 'Build Selesai! APK berhasil dibuat.' },
+      { delay: 11500, type: 'success', text: 'File APK siap diunduh.' },
+    ]
+
+    buildSteps.forEach((step) => {
+      setTimeout(() => {
+        setLogs((prev) => [
+          ...prev,
+          {
+            time: new Date().toLocaleTimeString('id-ID', { hour12: false }),
+            type: step.type,
+            text: step.text,
+          },
+        ])
+        if (step.delay === 11500) setIsBuilding(false)
+      }, step.delay)
+    })
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-10">
+      {/* Header Ringkasan */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 text-center">
         <div className="mx-auto grid h-16 w-16 place-items-center overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 shadow-lg">
           {data.appIconPreview ? (
@@ -316,82 +172,62 @@ jobs:
         </div>
       </div>
 
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-        <div className="border-b border-zinc-800/50 px-5 py-3">
-          <h3 className="text-sm font-semibold text-zinc-300">Ringkasan Konfigurasi</h3>
-        </div>
-        <div className="divide-y divide-zinc-800/50 text-sm">
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-zinc-500">Mode</span>
-            <span className="font-medium text-zinc-200">{modeInfo.label}</span>
+      {/* Tampilkan Terminal Log Jika Sedang Build atau Sudah Selesai Simulasi */}
+      {(isBuilding || logs.length > 0) && (
+        <div className="animate-fade-in">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-zinc-300">
+            <Terminal size={16} className="text-primary" />
+            Proses Auto-Build
           </div>
-          {data.mode === 'website' && (
-            <div className="flex items-center justify-between px-5 py-3">
-              <span className="text-zinc-500">URL Target</span>
-              <span className="max-w-[60%] truncate font-medium text-zinc-200">
-                {data.websiteUrl}
-              </span>
-            </div>
-          )}
-          {['zip', 'docs', 'gallery'].includes(data.mode) && (
-            <div className="flex items-center justify-between px-5 py-3">
-              <span className="text-zinc-500">File Upload</span>
-              <span className="max-w-[60%] truncate font-medium text-zinc-200">
-                {data.uploadedFileName}
-              </span>
-            </div>
-          )}
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-zinc-500">Warna Tema</span>
-            <div className="flex items-center gap-2">
-              <div
-                className="h-4 w-4 rounded-full border border-zinc-600"
-                style={{ backgroundColor: data.themeColor }}
-              />
-              <span className="font-mono text-xs uppercase text-zinc-200">
-                {data.themeColor}
-              </span>
-            </div>
-          </div>
+          <TerminalLog logs={logs} isBuilding={isBuilding} />
         </div>
-      </div>
+      )}
 
-      {!isDone ? (
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-semibold text-white shadow-lg shadow-primary/25 transition hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-        >
-          {isGenerating ? (
-            <>
-              <Loader2 size={18} className="animate-spin" />
-              Memproses & Mengemas File...
-            </>
-          ) : (
-            <>
-              <FileArchive size={18} />
-              Download Proyek (ZIP)
-            </>
-          )}
-        </button>
-      ) : (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
-          <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
-          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Proyek Siap!</h3>
-          <p className="mt-1 text-sm text-emerald-200/70">
-            File <b>{savedFileName}</b> telah dibuat beserta file-file pendukungnya. Jika belum tersimpan, ketuk tombol di bawah.
-          </p>
+      {/* Tombol Aksi */}
+      {!isBuilding && logs.length === 0 && (
+        <div className="space-y-3">
           <button
-            onClick={handleGenerate}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500/20 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/30"
+            type="button"
+            onClick={handleAutoBuild}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/25 transition hover:bg-emerald-600"
           >
-            <Share2 size={16} />
-            Simpan Ulang / Bagikan File
+            <Rocket size={18} />
+            Auto-Build APK (Simulasi)
+          </button>
+          
+          <div className="relative flex py-2 items-center">
+            <div className="flex-grow border-t border-zinc-800"></div>
+            <span className="flex-shrink-0 mx-4 text-zinc-600 text-xs">atau</span>
+            <div className="flex-grow border-t border-zinc-800"></div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGenerateZip}
+            disabled={isGenerating}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-800 py-3.5 text-sm font-semibold text-white transition hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <FileArchive size={18} />}
+            {isGenerating ? 'Mengemas ZIP...' : 'Download Proyek (Manual)'}
           </button>
         </div>
       )}
 
+      {/* Jika Auto-Build Simulasi Selesai */}
+      {!isBuilding && logs.length > 0 && (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center animate-fade-in">
+          <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
+          <h3 className="mt-3 text-lg font-semibold text-emerald-400">Simulasi Build Sukses!</h3>
+          <p className="mt-1 text-sm text-emerald-200/70">
+            Ini adalah tampilan ketika API GitHub sudah terhubung. Tombol download APK akan muncul di sini.
+          </p>
+          <button className="mt-4 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20">
+            Download APK (Placeholder)
+          </button>
+        </div>
+      )}
+
+      {/* Error Manual ZIP */}
       {errorMsg && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400 text-center">
           {errorMsg}
