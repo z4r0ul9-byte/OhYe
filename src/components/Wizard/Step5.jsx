@@ -65,11 +65,11 @@ export default function Step5({ data }) {
     ])
   }
 
-  // --- GENERATE FILE PROYEK ---
+  // --- GENERATE FILE PROYEK DENGAN OPTIMASI ---
   const generateProjectFiles = async () => {
     const zip = new JSZip()
 
-    // 1. PERBAIKAN CAPACITOR CONFIG (Wajib untuk iframe lokal)
+    // 1. Optimasi Capacitor Config (Splash Screen & Status Bar)
     zip.file('capacitor.config.json', JSON.stringify({ 
       appId: 'com.generated.app', 
       appName: data.appName || 'My App', 
@@ -80,56 +80,66 @@ export default function Step5({ data }) {
       },
       android: {
         allowMixedContent: true
+      },
+      plugins: {
+        SplashScreen: {
+          launchShowDuration: 2000,
+          backgroundColor: data.splashColor || '#5c5cff',
+          showSpinner: false,
+        },
+        StatusBar: {
+          style: 'DARK',
+          backgroundColor: data.themeColor || '#5c5cff',
+        }
       }
     }, null, 2))
 
-    // 2. PACKAGE JSON
-    zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
+    // 2. Optimasi Package (Tambahkan plugin StatusBar & SplashScreen)
+    zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "@capacitor/status-bar": "^6.0.1",\n    "@capacitor/splash-screen": "^6.0.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
     
     zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
     
-    // 3. INDEX HTML (Tambahkan loading text sebagai fallback)
     zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body style="background-color: #000; color: #fff; font-family: sans-serif;">\n<div id="root"><div style="text-align:center; padding: 50px;">Memuat Aplikasi...</div></div>\n<script type="module" src="/src/main.jsx"></script></body>\n</html>`)
     
-    zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
+    // 3. Inisialisasi Status Bar di main.jsx
+    zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\nimport { StatusBar } from '@capacitor/status-bar';\nimport { Capacitor } from '@capacitor/core';\n\nif (Capacitor.isNativePlatform()) {\n  StatusBar.setBackgroundColor({ color: '${data.themeColor || '#5c5cff'}' });\n  StatusBar.setStyle({ style: 'DARK' });\n}\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
 
-    // 4. LOGIKA APP.JSX
+    // 4. Logika App
     let appJsx = ''
-    
     if (data.mode === 'website') {
-      // Untuk mode website, gunakan iframe dengan http/https
       appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} allow="geolocation; microphone; camera" />) }`
     } else if (data.mode === 'html') {
       appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh', backgroundColor: '#fff' }} />) }`
     } else if (data.mode === 'zip' && data.uploadedFile) {
-      // PERBAIKAN: Deteksi lokasi index.html secara otomatis (jika di dalam folder)
       const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
       const filePromises = []
-      let indexHtmlPath = 'index.html' // Default jika di luar
+      let indexHtmlPath = 'index.html'
 
       uploadedZip.forEach((relativePath, file) => {
         if (!file.dir) {
           if (relativePath.toLowerCase().endsWith('index.html')) {
-            indexHtmlPath = relativePath; // Update path jika ditemukan di dalam folder
+            indexHtmlPath = relativePath;
           }
           filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
         }
       })
       await Promise.all(filePromises)
       
-      // Gunakan path yang ditemukan
       appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
       zip.file('src/App.jsx', appJsx)
     } else {
       appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
     }
     
-    // Simpan App.jsx utama (untuk mode selain zip)
     if (data.mode !== 'zip') {
       zip.file('src/App.jsx', appJsx)
     }
 
-    if (data.appIcon) zip.file('public/icon.png', data.appIcon)
+    // 5. Simpan Ikon ke folder assets agar dibaca oleh @capacitor/assets
+    if (data.appIcon) {
+      zip.file('assets/icon.png', data.appIcon)
+      zip.file('assets/splash.png', data.appIcon) // Gunakan ikon sbg default splash
+    }
 
     return zip
   }
@@ -141,7 +151,9 @@ export default function Step5({ data }) {
 
     try {
       const zip = await generateProjectFiles()
-      zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
+      
+      // Workflow manual dengan optimasi ikon
+      zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - name: Generate App Icons\n        run: npx @capacitor/assets generate --android || true\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
 
       const content = await zip.generateAsync({ type: 'blob' })
       const base64Data = await blobToBase64(content)
@@ -193,6 +205,7 @@ export default function Step5({ data }) {
       addLog('Mengemas proyek ke dalam ZIP...')
       const zip = await generateProjectFiles()
       
+      // Workflow Auto-Build dengan optimasi ikon
       const workflowYml = `name: Build APK
 on: [push, workflow_dispatch]
 permissions:
@@ -210,6 +223,8 @@ jobs:
         with: { distribution: 'temurin', java-version: '17' }
       - uses: android-actions/setup-android@v4.0.4
       - run: npm install --legacy-peer-deps
+      - name: Generate App Icons
+        run: npx @capacitor/assets generate --android || true
       - run: npm run build
       - run: npx cap add android || true
       - run: npx cap sync android
@@ -287,6 +302,7 @@ jobs:
     }
   }
 
+  // --- HAPUS REPO (DENGAN PESAN ERROR YANG JELAS) ---
   const handleDeleteRepo = async () => {
     if (!repoInfo) return
     const token = localStorage.getItem('github_token')
@@ -297,14 +313,17 @@ jobs:
       const res = await fetch(`https://api.github.com/repos/${repoInfo.owner}/${repoInfo.repo}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
       })
+      
       if (res.ok) {
         addLog('Repositori berhasil dihapus dari GitHub.', 'success')
         setRepoInfo(null)
       } else {
-        addLog('Gagal menghapus repositori.', 'error')
+        // Jika gagal, berikan pesan instruksi perbaikan token
+        addLog('Gagal: Token Anda tidak memiliki izin "delete_repo".', 'error')
+        setErrorMsg('Gagal menghapus repo. Anda perlu membuat Token baru di GitHub dengan centang izin "delete_repo".')
       }
     } catch (err) {
-      addLog('Terjadi kesalahan saat menghapus repo.', 'error')
+      addLog('Terjadi kesalahan jaringan saat menghapus repo.', 'error')
     } finally {
       setIsDeleting(false)
     }
