@@ -25,7 +25,6 @@ const MODE_LABELS = {
   livedev: { label: 'Live Dev', icon: Radio },
 }
 
-// Fungsi bantu untuk mengubah Blob menjadi Base64 (dibutuhkan oleh Capacitor Filesystem)
 const blobToBase64 = (blob) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -135,8 +134,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 )`
       )
 
-      // 6. src/App.jsx (Dinamis)
+      // 6. Public Assets (Icon & Uploaded Files)
+      if (data.appIcon) {
+        zip.file('public/icon.png', data.appIcon)
+      }
+
       let appJsx = ''
+
+      // Logika berdasarkan mode
       if (data.mode === 'website') {
         appJsx = `export default function App() {
   return (
@@ -157,17 +162,64 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     />
   )
 }`
+      } else if (data.mode === 'zip' && data.uploadedFile) {
+        // Bongkar file ZIP yang di-upload dan masukkan ke public/offline
+        const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
+        const filePromises = []
+
+        uploadedZip.forEach((relativePath, file) => {
+          if (!file.dir) {
+            filePromises.push(
+              file.async('blob').then((blob) => {
+                zip.file(`public/offline/${relativePath}`, blob)
+              })
+            )
+          }
+        })
+        await Promise.all(filePromises)
+
+        // Tampilkan menggunakan iframe
+        appJsx = `export default function App() {
+  return (
+    <iframe
+      src="./offline/index.html"
+      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
+    />
+  )
+}`
+      } else if ((data.mode === 'docs' || data.mode === 'gallery') && data.uploadedFile) {
+        // Masukkan file dokumen/gambar ke public/uploads
+        zip.file(`public/uploads/${data.uploadedFileName}`, data.uploadedFile)
+
+        if (data.mode === 'docs') {
+          appJsx = `export default function App() {
+  return (
+    <iframe
+      src="./uploads/${data.uploadedFileName}"
+      style={{ width: '100vw', height: '100vh', border: 'none', margin: 0, padding: 0 }}
+    />
+  )
+}`
+        } else {
+          appJsx = `export default function App() {
+  return (
+    <div style={{ backgroundColor: '#000', width: '100vw', height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <img src="./uploads/${data.uploadedFileName}" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+    </div>
+  )
+}`
+        }
       } else {
         appJsx = `export default function App() {
   return (
     <div style={{ padding: '20px', color: 'white', backgroundColor: '#000', height: '100vh' }}>
       <h1>${data.appName || 'Aplikasi'}</h1>
-      <p>Mode: ${data.mode}</p>
-      <p>File: ${data.uploadedFileName || '-'}</p>
+      <p>Selamat datang di aplikasi Anda.</p>
     </div>
   )
 }`
       }
+
       zip.file('src/App.jsx', appJsx)
 
       // 7. Workflow GitHub Actions
@@ -194,7 +246,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - uses: android-actions/setup-android@v4.0.4
-      - run: npm install
+      - run: npm install --legacy-peer-deps
       - run: npm run build
       - run: npx cap add android || true
       - run: npx cap sync android
@@ -216,12 +268,11 @@ jobs:
 `
       )
 
-      // 8. Generate ZIP dan simpan via Capacitor
+      // 8. Generate ZIP dan simpan
       const content = await zip.generateAsync({ type: 'blob' })
       const base64Data = await blobToBase64(content)
       const fileName = `${(data.appName || 'app').replace(/\s+/g, '-').toLowerCase()}-project.zip`
 
-      // Simpan ke cache internal aplikasi
       const savedFile = await Filesystem.writeFile({
         path: fileName,
         data: base64Data,
@@ -230,7 +281,6 @@ jobs:
 
       setSavedFileName(fileName)
 
-      // Buka menu Share Android agar user bisa menyimpan ke folder Download/Drive/WA
       await Share.share({
         title: 'Simpan Proyek Aplikasi',
         text: 'Pilih "Simpan ke File" atau bagikan ke penyimpanan lain.',
@@ -241,7 +291,7 @@ jobs:
       setIsDone(true)
     } catch (err) {
       console.error(err)
-      setErrorMsg(err.message || 'Terjadi kesalahan saat membuat file ZIP.')
+      setErrorMsg(err.message || 'Terjadi kesalahan saat memproses file. Pastikan file ZIP yang di-upload valid.')
     } finally {
       setIsGenerating(false)
     }
@@ -316,7 +366,7 @@ jobs:
           {isGenerating ? (
             <>
               <Loader2 size={18} className="animate-spin" />
-              Mengemas Proyek (.zip)...
+              Memproses & Mengemas File...
             </>
           ) : (
             <>
@@ -330,7 +380,7 @@ jobs:
           <CheckCircle2 size={32} className="mx-auto text-emerald-400" />
           <h3 className="mt-3 text-lg font-semibold text-emerald-400">Proyek Siap!</h3>
           <p className="mt-1 text-sm text-emerald-200/70">
-            File <b>{savedFileName}</b> telah berhasil dibuat. Jika belum tersimpan di folder Download, ketuk tombol di bawah untuk menyimpannya kembali.
+            File <b>{savedFileName}</b> telah dibuat beserta file-file pendukungnya. Jika belum tersimpan, ketuk tombol di bawah.
           </p>
           <button
             onClick={handleGenerate}
