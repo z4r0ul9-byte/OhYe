@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import WizardLayout from './components/Wizard/WizardLayout'
 import Step1 from './components/Wizard/Step1'
+import Step2 from './components/Wizard/Step2'
 import Step5 from './components/Wizard/Step5'
 import PlaceholderStep from './components/Wizard/PlaceholderStep'
 
@@ -32,13 +33,11 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState(1)
   const [formData, setFormData] = useState(INITIAL_DATA)
   
-  // State untuk mengontrol proses generate di Step 5
   const [isGenerating, setIsGenerating] = useState(false)
   const [isDone, setIsDone] = useState(false)
 
   const update = (patch) => setFormData((prev) => ({ ...prev, ...patch }))
 
-  // Validasi khusus Step 1
   const isStep1Valid = (() => {
     if (!formData.mode) return false
     if (formData.appName.trim().length === 0) return false
@@ -56,7 +55,7 @@ export default function App() {
 
   const canAdvance = () => {
     if (currentStep === 1) return isStep1Valid
-    if (currentStep === 5) return !isGenerating && !isDone // Disable next kalau sedang generate/done
+    if (currentStep === 5) return !isGenerating && !isDone 
     return true
   }
 
@@ -78,6 +77,8 @@ export default function App() {
     switch (currentStep) {
       case 1:
         return <Step1 data={formData} update={update} />
+      case 2:
+        return <Step2 data={formData} update={update} />
       case 5:
         return <Step5 data={formData} />
       default:
@@ -98,7 +99,7 @@ export default function App() {
       onPrev={handlePrev}
       canNext={canAdvance()}
       isLast={currentStep === STEPS.length}
-      hideNextButton={currentStep === 5} // Sembunyikan tombol Lanjut/Generate di footer karena sudah ada di dalam Step5
+      hideNextButton={currentStep === 5}
     >
       {renderStep()}
     </WizardLayout>
