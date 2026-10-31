@@ -8,46 +8,15 @@ import {
 } from 'lucide-react'
 
 const FEATURES_LIST = [
-  {
-    id: 'offline',
-    title: 'Offline Support',
-    desc: 'Simpan cache agar aplikasi bisa dibuka tanpa internet.',
-    icon: WifiOff,
-  },
-  {
-    id: 'pullToRefresh',
-    title: 'Pull-to-Refresh',
-    desc: 'Tarik layar ke bawah untuk memuat ulang halaman.',
-    icon: RefreshCw,
-  },
-  {
-    id: 'hideScrollbar',
-    title: 'Sembunyikan Scrollbar',
-    desc: 'Hilangkan garis gulir agar tampilan lebih bersih.',
-    icon: EyeOff,
-  },
-  {
-    id: 'fullscreen',
-    title: 'Mode Fullscreen',
-    desc: 'Sembunyikan status bar dan navigasi bawaan Android.',
-    icon: Maximize,
-  },
-  {
-    id: 'zoomControl',
-    title: 'Kontrol Zoom',
-    desc: 'Izinkan pengguna melakukan zoom in / zoom out.',
-    icon: ZoomIn,
-  },
-  {
-    id: 'externalLinks',
-    title: 'Tautan Luar',
-    desc: 'Buka link ke domain lain menggunakan browser bawaan HP.',
-    icon: ExternalLink,
-  },
+  { id: 'offline', title: 'Offline Support', desc: 'Simpan cache agar aplikasi bisa dibuka tanpa internet.', icon: WifiOff },
+  { id: 'pullToRefresh', title: 'Pull-to-Refresh', desc: 'Tarik layar ke bawah untuk memuat ulang halaman.', icon: RefreshCw },
+  { id: 'hideScrollbar', title: 'Sembunyikan Scrollbar', desc: 'Hilangkan garis gulir agar tampilan lebih bersih.', icon: EyeOff },
+  { id: 'fullscreen', title: 'Mode Fullscreen', desc: 'Sembunyikan status bar dan navigasi bawaan Android.', icon: Maximize },
+  { id: 'zoomControl', title: 'Kontrol Zoom', desc: 'Izinkan pengguna melakukan zoom in / zoom out.', icon: ZoomIn },
+  { id: 'externalLinks', title: 'Tautan Luar', desc: 'Buka link ke domain lain menggunakan browser bawaan HP.', icon: ExternalLink },
 ]
 
 export default function Step3({ data, update }) {
-  // Fungsi untuk mengubah status toggle
   const handleToggle = (featureId) => {
     update({
       features: {
@@ -73,9 +42,9 @@ export default function Step3({ data, update }) {
             const isActive = !!data.features[feature.id]
 
             return (
-              <div
+              // Menggunakan <label> agar area klik 100% berfungsi di Android WebView
+              <label
                 key={feature.id}
-                onClick={() => handleToggle(feature.id)}
                 className={`flex cursor-pointer items-center justify-between rounded-xl border p-4 transition-all ${
                   isActive
                     ? 'border-primary/50 bg-primary/5'
@@ -100,7 +69,15 @@ export default function Step3({ data, update }) {
                   </div>
                 </div>
 
-                {/* Custom Toggle Switch */}
+                {/* Hidden checkbox untuk aksesibilitas & event native */}
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={isActive}
+                  onChange={() => handleToggle(feature.id)}
+                />
+
+                {/* Custom Toggle Switch (Hanya Visual) */}
                 <div
                   className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-300 ${
                     isActive ? 'bg-primary' : 'bg-zinc-700'
@@ -112,7 +89,7 @@ export default function Step3({ data, update }) {
                     }`}
                   />
                 </div>
-              </div>
+              </label>
             )
           })}
         </div>
