@@ -65,34 +65,21 @@ export default function Step5({ data }) {
     ])
   }
 
-  // --- GENERATE FILE PROYEK DENGAN OPTIMASI IKON ---
+  // --- GENERATE FILE PROYEK (DIPERBAIKI) ---
   const generateProjectFiles = async () => {
     const zip = new JSZip()
 
-    // 1. Tambahkan @capacitor/assets ke devDependencies
     zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "@capacitor/status-bar": "^6.0.1",\n    "@capacitor/splash-screen": "^6.0.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@capacitor/assets": "^3.0.5",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
     
     zip.file('capacitor.config.json', JSON.stringify({ 
       appId: 'com.generated.app', 
       appName: data.appName || 'My App', 
       webDir: 'dist',
-      server: {
-        androidScheme: 'https',
-        allowNavigation: ['*']
-      },
-      android: {
-        allowMixedContent: true
-      },
+      server: { androidScheme: 'https', allowNavigation: ['*'] },
+      android: { allowMixedContent: true },
       plugins: {
-        SplashScreen: {
-          launchShowDuration: 2000,
-          backgroundColor: data.splashColor || '#5c5cff',
-          showSpinner: false,
-        },
-        StatusBar: {
-          style: 'DARK',
-          backgroundColor: data.themeColor || '#5c5cff',
-        }
+        SplashScreen: { launchShowDuration: 2000, backgroundColor: data.splashColor || '#5c5cff', showSpinner: false },
+        StatusBar: { style: 'DARK', backgroundColor: data.themeColor || '#5c5cff' }
       }
     }, null, 2))
 
@@ -106,22 +93,34 @@ export default function Step5({ data }) {
     } else if (data.mode === 'html') {
       appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh', backgroundColor: '#fff' }} />) }`
     } else if (data.mode === 'zip' && data.uploadedFile) {
-      const uploadedZip = await JSZip.loadAsync(data.uploadedFile)
-      const filePromises = []
-      let indexHtmlPath = 'index.html'
+      // PERBAIKAN: Baca file sebagai ArrayBuffer terlebih dahulu
+      try {
+        const fileBuffer = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = (e) => resolve(e.target.result)
+          reader.onerror = (e) => reject(new Error('Gagal membaca file ZIP. Silakan pilih ulang file di Step 1.'))
+          reader.readAsArrayBuffer(data.uploadedFile)
+        })
 
-      uploadedZip.forEach((relativePath, file) => {
-        if (!file.dir) {
-          if (relativePath.toLowerCase().endsWith('index.html')) {
-            indexHtmlPath = relativePath;
+        const uploadedZip = await JSZip.loadAsync(fileBuffer)
+        const filePromises = []
+        let indexHtmlPath = 'index.html'
+
+        uploadedZip.forEach((relativePath, file) => {
+          if (!file.dir) {
+            if (relativePath.toLowerCase().endsWith('index.html')) {
+              indexHtmlPath = relativePath;
+            }
+            filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
           }
-          filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
-        }
-      })
-      await Promise.all(filePromises)
-      
-      appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
-      zip.file('src/App.jsx', appJsx)
+        })
+        await Promise.all(filePromises)
+        
+        appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
+        zip.file('src/App.jsx', appJsx)
+      } catch (err) {
+        throw new Error('File ZIP tidak dapat dibaca (Izin ditolak Android). Silakan kembali ke Step 1 dan pilih ulang file.')
+      }
     } else {
       appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
     }
@@ -130,10 +129,11 @@ export default function Step5({ data }) {
       zip.file('src/App.jsx', appJsx)
     }
 
-    // PERBAIKAN IKON: Simpan ke assets/icon.png dan splash.png
-    if (data.appIcon) {
-      zip.file('assets/icon.png', data.appIcon)
-      zip.file('assets/splash.png', data.appIcon) 
+    // PERBAIKAN IKON: Gunakan Base64 Preview agar tidak kena limit izin
+    if (data.appIconPreview) {
+      const base64Data = data.appIconPreview.split(',')[1];
+      zip.file('assets/icon.png', base64Data, { base64: true });
+      zip.file('assets/splash.png', base64Data, { base64: true });
     }
 
     return zip
@@ -146,8 +146,6 @@ export default function Step5({ data }) {
 
     try {
       const zip = await generateProjectFiles()
-      
-      // Perbaikan perintah menjadi capacitor-assets
       zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - name: Generate App Icons\n        run: npx capacitor-assets generate --android || true\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
 
       const content = await zip.generateAsync({ type: 'blob' })
@@ -198,9 +196,9 @@ export default function Step5({ data }) {
       setRepoInfo({ owner: username, repo: repoName })
 
       addLog('Mengemas proyek ke dalam ZIP...')
+      // generateProjectFiles di sini sekarang sudah menggunakan FileReader
       const zip = await generateProjectFiles()
       
-      // Perbaikan perintah menjadi capacitor-assets
       const workflowYml = `name: Build APK
 on: [push, workflow_dispatch]
 permissions:
