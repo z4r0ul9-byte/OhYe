@@ -65,12 +65,11 @@ export default function Step5({ data }) {
     ])
   }
 
-  // --- GENERATE FILE PROYEK (DIPERBAIKI) ---
+  // --- GENERATE FILE PROYEK DENGAN OPTIMASI ---
   const generateProjectFiles = async () => {
     const zip = new JSZip()
 
-    zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "@capacitor/status-bar": "^6.0.1",\n    "@capacitor/splash-screen": "^6.0.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@capacitor/assets": "^3.0.5",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
-    
+    // 1. Konfigurasi Capacitor
     zip.file('capacitor.config.json', JSON.stringify({ 
       appId: 'com.generated.app', 
       appName: data.appName || 'My App', 
@@ -83,44 +82,48 @@ export default function Step5({ data }) {
       }
     }, null, 2))
 
+    // 2. Package.json dengan plugin tambahan
+    zip.file('package.json', `{\n  "name": "generated-app",\n  "private": true,\n  "version": "1.0.0",\n  "type": "module",\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build"\n  },\n  "dependencies": {\n    "@capacitor/android": "^6.1.2",\n    "@capacitor/core": "^6.1.2",\n    "@capacitor/status-bar": "^6.0.1",\n    "@capacitor/splash-screen": "^6.0.2",\n    "react": "^18.3.1",\n    "react-dom": "^18.3.1"\n  },\n  "devDependencies": {\n    "@capacitor/cli": "^6.1.2",\n    "@vitejs/plugin-react": "^4.3.2",\n    "typescript": "^5.6.2",\n    "vite": "^5.4.8"\n  }\n}`)
+    
     zip.file('vite.config.js', `import { defineConfig } from 'vite'\nimport react from '@vitejs/plugin-react'\n\nexport default defineConfig({ plugins: [react()], base: './' })`)
-    zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title></head>\n<body style="background-color: #000; color: #fff; font-family: sans-serif;">\n<div id="root"><div style="text-align:center; padding: 50px;">Memuat Aplikasi...</div></div>\n<script type="module" src="/src/main.jsx"></script></body>\n</html>`)
-    zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\nimport { StatusBar } from '@capacitor/status-bar';\nimport { Capacitor } from '@capacitor/core';\n\nif (Capacitor.isNativePlatform()) {\n  StatusBar.setBackgroundColor({ color: '${data.themeColor || '#5c5cff'}' });\n  StatusBar.setStyle({ style: 'DARK' });\n}\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
+    
+    // 3. Index HTML & Main JSX dengan fitur Fullscreen/Hide Scrollbar
+    const hideScrollbarCSS = data.features?.hideScrollbar ? '::-webkit-scrollbar { display: none; }' : '';
+    zip.file('index.html', `<!doctype html>\n<html lang="en">\n<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>${data.appName}</title>\n<style>${hideScrollbarCSS}</style></head>\n<body style="background-color: #000; color: #fff; font-family: sans-serif;">\n<div id="root"><div style="text-align:center; padding: 50px;">Memuat Aplikasi...</div></div>\n<script type="module" src="/src/main.jsx"></script></body>\n</html>`)
+    
+    zip.file('src/main.jsx', `import React from 'react'\nimport ReactDOM from 'react-dom/client'\nimport App from './App.jsx'\nimport { StatusBar } from '@capacitor/status-bar';\nimport { Capacitor } from '@capacitor/core';\n\nif (Capacitor.isNativePlatform()) {\n  StatusBar.setBackgroundColor({ color: '${data.themeColor || '#5c5cff'}' });\n  StatusBar.setStyle({ style: 'DARK' });\n  ${data.features?.fullscreen ? 'StatusBar.hide();' : ''}\n}\n\nReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)`)
 
+    // 4. Logika App
     let appJsx = ''
     if (data.mode === 'website') {
       appJsx = `export default function App() { return (<iframe src="${data.websiteUrl}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} allow="geolocation; microphone; camera" />) }`
     } else if (data.mode === 'html') {
       appJsx = `export default function App() { return (<div dangerouslySetInnerHTML={{ __html: \`${(data.html || '').replace(/`/g, '\\`')}\` }} style={{ width: '100vw', height: '100vh', backgroundColor: '#fff' }} />) }`
     } else if (data.mode === 'zip' && data.uploadedFile) {
-      // PERBAIKAN: Baca file sebagai ArrayBuffer terlebih dahulu
-      try {
-        const fileBuffer = await new Promise((resolve, reject) => {
-          const reader = new FileReader()
-          reader.onload = (e) => resolve(e.target.result)
-          reader.onerror = (e) => reject(new Error('Gagal membaca file ZIP. Silakan pilih ulang file di Step 1.'))
-          reader.readAsArrayBuffer(data.uploadedFile)
-        })
+      // Baca file sebagai ArrayBuffer
+      const fileBuffer = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target.result)
+        reader.onerror = () => reject(new Error('Gagal membaca file ZIP. Silakan pilih ulang file di Step 1.'))
+        reader.readAsArrayBuffer(data.uploadedFile)
+      })
 
-        const uploadedZip = await JSZip.loadAsync(fileBuffer)
-        const filePromises = []
-        let indexHtmlPath = 'index.html'
+      const uploadedZip = await JSZip.loadAsync(fileBuffer)
+      const filePromises = []
+      let indexHtmlPath = 'index.html'
 
-        uploadedZip.forEach((relativePath, file) => {
-          if (!file.dir) {
-            if (relativePath.toLowerCase().endsWith('index.html')) {
-              indexHtmlPath = relativePath;
-            }
-            filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
+      uploadedZip.forEach((relativePath, file) => {
+        if (!file.dir) {
+          if (relativePath.toLowerCase().endsWith('index.html')) {
+            indexHtmlPath = relativePath;
           }
-        })
-        await Promise.all(filePromises)
-        
-        appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
-        zip.file('src/App.jsx', appJsx)
-      } catch (err) {
-        throw new Error('File ZIP tidak dapat dibaca (Izin ditolak Android). Silakan kembali ke Step 1 dan pilih ulang file.')
-      }
+          filePromises.push(file.async('blob').then((blob) => zip.file(`public/offline/${relativePath}`, blob)))
+        }
+      })
+      await Promise.all(filePromises)
+      
+      appJsx = `export default function App() { return (<iframe src="./offline/${indexHtmlPath}" style={{ width: '100vw', height: '100vh', border: 'none', backgroundColor: '#fff' }} />) }`
+      zip.file('src/App.jsx', appJsx)
     } else {
       appJsx = `export default function App() { return (<div style={{ color: 'white', backgroundColor: '#000', height: '100vh', padding: 20 }}><h1>${data.appName}</h1><p>Mode: ${data.mode}</p></div>) }`
     }
@@ -129,12 +132,56 @@ export default function Step5({ data }) {
       zip.file('src/App.jsx', appJsx)
     }
 
-    // PERBAIKAN IKON: Gunakan Base64 Preview agar tidak kena limit izin
+    // 5. Simpan Ikon sebagai Base64
     if (data.appIconPreview) {
       const base64Data = data.appIconPreview.split(',')[1];
       zip.file('assets/icon.png', base64Data, { base64: true });
       zip.file('assets/splash.png', base64Data, { base64: true });
     }
+
+    // 6. SKRIP UNTUK MEMODIFIKASI ANDROID (Izin & Ikon)
+    const permissionsList = []
+    if (data.permissions?.includes('camera')) permissionsList.push('<uses-permission android:name="android.permission.CAMERA" />')
+    if (data.permissions?.includes('location')) permissionsList.push('<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />')
+    if (data.permissions?.includes('storage')) permissionsList.push('<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />')
+    if (data.permissions?.includes('notification')) permissionsList.push('<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />')
+    if (data.permissions?.includes('microphone')) permissionsList.push('<uses-permission android:name="android.permission.RECORD_AUDIO" />')
+    if (data.permissions?.includes('contacts')) permissionsList.push('<uses-permission android:name="android.permission.READ_CONTACTS" />')
+    
+    const permissionsString = permissionsList.join('\n    ');
+
+    const updateScript = `
+import fs from 'fs';
+import path from 'path';
+
+const manifestPath = path.join(process.cwd(), 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+if (fs.existsSync(manifestPath)) {
+  let content = fs.readFileSync(manifestPath, 'utf8');
+  if (!content.includes('android.permission.CAMERA')) {
+    content = content.replace('</manifest>', \`    ${permissionsString}\\n</manifest>\`);
+    fs.writeFileSync(manifestPath, content);
+    console.log('Permissions injected successfully.');
+  }
+}
+
+// Copy Icon
+const iconSrc = path.join(process.cwd(), 'assets', 'icon.png');
+if (fs.existsSync(iconSrc)) {
+  const resDir = path.join(process.cwd(), 'android', 'app', 'src', 'main', 'res');
+  const densities = ['mipmap-mdpi', 'mipmap-hdpi', 'mipmap-xhdpi', 'mipmap-xxhdpi', 'mipmap-xxxhdpi'];
+  const sizes = [48, 72, 96, 144, 192];
+  
+  densities.forEach((dir, i) => {
+    const destDir = path.join(resDir, dir);
+    if (fs.existsSync(destDir)) {
+      fs.copyFileSync(iconSrc, path.join(destDir, 'ic_launcher.png'));
+      fs.copyFileSync(iconSrc, path.join(destDir, 'ic_launcher_round.png'));
+    }
+  });
+  console.log('Icons replaced manually.');
+}
+`
+    zip.file('update-android.mjs', updateScript)
 
     return zip
   }
@@ -146,7 +193,9 @@ export default function Step5({ data }) {
 
     try {
       const zip = await generateProjectFiles()
-      zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - name: Generate App Icons\n        run: npx capacitor-assets generate --android || true\n      - run: npm run build\n      - run: npx cap add android || true\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
+      
+      // Workflow manual
+      zip.file('.github/workflows/build-apk.yml', `name: Build APK\non: [push, workflow_dispatch]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with: { node-version: '20' }\n      - uses: actions/setup-java@v4\n        with: { distribution: 'temurin', java-version: '17' }\n      - uses: android-actions/setup-android@v4.0.4\n      - run: npm install --legacy-peer-deps\n      - run: npm run build\n      - run: npx cap add android || true\n      - name: Apply Android Customizations\n        run: node update-android.mjs\n      - run: npx cap sync android\n      - run: chmod +x android/gradlew\n      - run: ./gradlew assembleDebug --no-daemon\n        working-directory: android\n      - uses: actions/upload-artifact@v4\n        with:\n          name: app-debug-apk\n          path: android/app/build/outputs/apk/debug/app-debug.apk`)
 
       const content = await zip.generateAsync({ type: 'blob' })
       const base64Data = await blobToBase64(content)
@@ -196,9 +245,9 @@ export default function Step5({ data }) {
       setRepoInfo({ owner: username, repo: repoName })
 
       addLog('Mengemas proyek ke dalam ZIP...')
-      // generateProjectFiles di sini sekarang sudah menggunakan FileReader
       const zip = await generateProjectFiles()
       
+      // Workflow Auto-Build dengan skrip kustom
       const workflowYml = `name: Build APK
 on: [push, workflow_dispatch]
 permissions:
@@ -216,10 +265,10 @@ jobs:
         with: { distribution: 'temurin', java-version: '17' }
       - uses: android-actions/setup-android@v4.0.4
       - run: npm install --legacy-peer-deps
-      - name: Generate App Icons
-        run: npx capacitor-assets generate --android || true
       - run: npm run build
       - run: npx cap add android || true
+      - name: Apply Android Customizations
+        run: node update-android.mjs
       - run: npx cap sync android
       - run: chmod +x android/gradlew
       - run: ./gradlew assembleDebug --no-daemon
@@ -240,7 +289,7 @@ jobs:
       })
       if (!uploadZipRes.ok) throw new Error('Gagal mengunggah file proyek.')
 
-      addLog('Mengunggah konfigurasi workflow (Auto-Fix applied)...')
+      addLog('Mengunggah konfigurasi workflow...')
       const uploadWfRes = await fetch(`https://api.github.com/repos/${username}/${repoName}/contents/.github/workflows/build-apk.yml`, {
         method: 'PUT', headers, body: JSON.stringify({ message: 'Add workflow', content: workflowBase64 }),
       })
